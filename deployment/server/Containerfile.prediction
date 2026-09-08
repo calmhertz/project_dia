@@ -1,0 +1,23 @@
+# Aagasa prediction service: internal Python satellite computation over gRPC.
+# Built from the repository root:
+#   podman build -f deploy/server/Containerfile.prediction .
+
+FROM docker.io/library/python:3.11-slim
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY server/python /app
+
+# Dependencies are resolved at build time into /app/.venv. Nothing resolves at
+# runtime: a container that reaches the network to start is a container that
+# cannot start when the network is down.
+RUN uv sync --frozen --no-dev
+
+# Runs as root inside the image; container root maps to the invoking host user
+# under rootless Podman, so no fixed uid is needed (deploy/README.md).
+
+# The console script from the built virtualenv, run directly.
+ENV PATH="/app/.venv/bin:$PATH"
+
+EXPOSE 9091
+CMD ["aagasa-prediction"]

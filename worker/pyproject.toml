@@ -1,0 +1,29 @@
+[project]
+name = "aagasa-worker"
+version = "0.1.0"
+description = "Aagasa Worker: ground-station edge execution agent"
+requires-python = ">=3.11"
+dependencies = [
+    "grpcio>=1.60",
+    "protobuf>=4.25",
+    "pyserial>=3.5",
+]
+
+[project.scripts]
+aagasa-worker = "aagasa_worker.main:main"
+aagasa-hardware = "aagasa_worker.hardware.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# "aagasa" holds generated protobuf code; regenerate with "make proto".
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["aagasa_worker*", "aagasa*"]
+
+[dependency-groups]
+dev = [
+    "grpcio-tools>=1.60",
+    "pytest>=8.0",
+]

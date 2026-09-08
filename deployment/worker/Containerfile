@@ -1,0 +1,27 @@
+# Aagasa Worker: ground-station edge executor.
+# Built from the repository root: podman build -f deployment/worker/Containerfile .
+#
+# SatDump is installed from the distribution package placed at
+# deployment/worker/satdump.deb; it is not committed to the repository.
+
+FROM docker.io/library/python:3.11-slim
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+COPY deployment/worker/satdump.deb /tmp/satdump.deb
+# rtl-sdr provides rtl_test, which the Worker uses to detect the radio.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends rtl-sdr /tmp/satdump.deb \
+    && rm -rf /var/lib/apt/lists/* /tmp/satdump.deb
+
+COPY worker /app
+RUN uv sync --frozen --no-dev
+
+# Runs as root inside the image; container root maps to the invoking host user
+# under rootless Podman, so no fixed uid is needed (deploy/README.md). The
+# rotator serial port and the SDR dongle are passed through with `devices:` in
+# compose.yaml and are governed by the host user's groups (dialout), not by a
+# uid inside the image.
+
+CMD ["uv", "run", "--frozen", "aagasa-worker"]

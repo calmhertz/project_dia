@@ -1,0 +1,123 @@
+syntax = "proto3";
+
+// The executable instruction the Server hands the Worker.
+//
+// A PassPlan must contain everything needed to run the pass without asking
+// the Server anything during normal execution (spec.md section 13.2), because
+// the Server may be unreachable when the pass runs.
+package aagasa.worker.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "aagasa/internal/gen/worker/v1;workerv1";
+
+enum RFBand {
+  RF_BAND_UNSPECIFIED = 0;
+  RF_BAND_VHF = 1;
+  RF_BAND_UHF = 2;
+}
+
+enum RecordingMode {
+  RECORDING_MODE_UNSPECIFIED = 0;
+  // Capture baseband only.
+  RECORDING_MODE_RAW = 1;
+  // Decode live through a pipeline.
+  RECORDING_MODE_PROCESS = 2;
+  RECORDING_MODE_RAW_AND_PROCESS = 3;
+}
+
+// OrbitalElements is the exact element set the plan was built from.
+message OrbitalElements {
+  string line1 = 1;
+  string line2 = 2;
+  google.protobuf.Timestamp epoch = 3;
+  // Identifier of the stored TLE version, so a plan stays traceable to the
+  // data it was computed from even after newer elements arrive.
+  string tle_record_id = 4;
+}
+
+message RadioSettings {
+  // SatDump source identifier, for example "rtlsdr".
+  string source = 1;
+  int64 frequency_hz = 2;
+  int64 sample_rate_hz = 3;
+  double gain_db = 4;
+  int32 ppm_correction = 5;
+  bool bias_tee_enabled = 6;
+}
+
+message SatDumpPipeline {
+  // Pipeline identifier as installed, for example "noaa_apt".
+  string identifier = 1;
+  bool is_custom = 2;
+  // Custom pipeline JSON is carried inline, not referenced: the Worker cannot
+  // fetch it mid-pass if the Server is unreachable.
+  string definition_json = 3;
+  string checksum_sha256 = 4;
+}
+
+// TrackPoint is one antenna pointing instruction.
+message TrackPoint {
+  google.protobuf.Timestamp at = 1;
+  double azimuth_degrees = 2;
+  double elevation_degrees = 3;
+  double range_km = 4;
+}
+
+// PassPlan is a complete, self-contained execution instruction.
+message PassPlan {
+  // Schema version of this message, so a Worker can refuse a plan it does not
+  // understand rather than executing it partially.
+  uint32 plan_version = 1;
+
+  string pass_id = 2;
+  string station_id = 3;
+  string worker_id = 4;
+
+  int32 norad_id = 5;
+  string satellite_name = 6;
+
+  OrbitalElements elements = 7;
+
+  // Execution timing. The Worker executes these times and never recomputes
+  // them; scheduling is the Server's decision alone (spec.md section 2.2).
+  google.protobuf.Timestamp aos = 8;
+  google.protobuf.Timestamp tca = 9;
+  google.protobuf.Timestamp los = 10;
+  double max_elevation_degrees = 11;
+
+  // Recording window, already widened by the configured margins. Distinct
+  // from the scheduling buffers, which are a Server-side resource concern and
+  // are deliberately not sent.
+  google.protobuf.Timestamp recording_start = 12;
+  google.protobuf.Timestamp recording_end = 13;
+
+  RFBand band = 14;
+  RadioSettings radio = 15;
+  RecordingMode recording_mode = 16;
+  SatDumpPipeline pipeline = 17;
+
+  // Pre-computed pointing timeline from AOS to LOS inclusive. The Worker
+  // executes this directly.
+  //
+  // The elements above are carried alongside it so a Worker running through a
+  // long Server outage can recompute *pointing* from fresher orbital data
+  // (worker-spec section 22). It must never recompute timing, never re-select
+  // a pass, and never schedule.
+  repeated TrackPoint track = 18;
+
+  // Content hash over every field except generated_at, so the same pass built
+  // from the same inputs always produces the same value. Both sides use it to
+  // decide whether a plan has actually changed.
+  string generation = 19;
+  google.protobuf.Timestamp generated_at = 20;
+}
+
+// PassPlanSet is the Worker's complete desired execution state.
+message PassPlanSet {
+  repeated PassPlan plans = 1;
+  // Hash over the member generations, so a Worker can report what it holds in
+  // one value (spec.md section 6.2).
+  string generation = 2;
+  google.protobuf.Timestamp generated_at = 3;
+}

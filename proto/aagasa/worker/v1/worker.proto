@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+
+// Contract between the Server (service host) and the Worker (client).
+//
+// Heartbeat, telemetry and result upload are added in V12.
+package aagasa.worker.v1;
+
+import "aagasa/worker/v1/passplan.proto";
+import "aagasa/worker/v1/recording.proto";
+
+option go_package = "aagasa/internal/gen/worker/v1;workerv1";
+
+service WorkerService {
+  // Connectivity check. The Worker authenticates with the shared secret in the
+  // "authorization" metadata header; see spec.md section 18.
+  rpc Ping(PingRequest) returns (PingResponse);
+
+  // Register resolves the Worker's identity from its configured name.
+  //
+  // The Worker is configured with a name and a shared secret; the Server owns
+  // the identifiers. That keeps operators from having to paste database ids
+  // into station configuration (spec.md section 7).
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // Heartbeat reports liveness and what the Worker currently holds.
+  //
+  // The response says whether that state is still current, so a Worker only
+  // pulls the desired state when it has actually changed
+  // (spec.md sections 6.2 and 7).
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+  // SyncPassPlans returns the Worker's desired execution state.
+  //
+  // Latest-state reconciliation, not an event log (spec.md section 6.2): the
+  // Worker says which generation it holds and the Server either confirms it
+  // is current or sends the whole current set.
+  rpc SyncPassPlans(SyncPassPlansRequest) returns (SyncPassPlansResponse);
+
+  // UploadRecording transfers one completed recording.
+  //
+  // Idempotent: re-uploading the same recording id succeeds without creating a
+  // second logical recording (spec.md section 19.3).
+  rpc UploadRecording(stream UploadRecordingRequest) returns (UploadRecordingResponse);
+
+  // ReportExecutions delivers pass outcomes recorded while offline.
+  rpc ReportExecutions(ReportExecutionsRequest) returns (ReportExecutionsResponse);
+}
+
+message SyncPassPlansRequest {
+  string worker_id = 1;
+  string station_id = 2;
+  // Generation the Worker currently holds. Empty on a first sync.
+  string current_generation = 3;
+}
+
+message SyncPassPlansResponse {
+  // False means the Worker is already current and plans is empty.
+  bool changed = 1;
+  PassPlanSet plans = 2;
+}
+
+message RegisterRequest {
+  string worker_name = 1;
+  string worker_version = 2;
+
+  // Pipelines the Worker's SatDump installation actually provides.
+  //
+  // The Server has no SatDump of its own, so this is the only honest source
+  // for what the Client may offer (server-spec section 21). Sent on
+  // registration because it changes only when SatDump is reinstalled.
+  repeated string available_pipelines = 3;
+}
+
+message RegisterResponse {
+  string worker_id = 1;
+  string station_id = 2;
+  string station_name = 3;
+}
+
+message HeartbeatRequest {
+  string worker_id = 1;
+  string worker_version = 2;
+
+  // Desired-state generation the Worker currently holds.
+  string state_generation = 3;
+
+  // What the Worker is still carrying, so an operator can see a backlog
+  // building during an outage.
+  uint32 pending_uploads = 4;
+  uint32 pending_reports = 5;
+
+  // Pass currently executing, empty when idle.
+  string current_pass_id = 6;
+}
+
+message HeartbeatResponse {
+  int64 server_time_unix_ms = 1;
+  // Generation the Server considers current. When it differs from the
+  // Worker's, the Worker pulls the desired state.
+  string desired_generation = 2;
+  bool state_is_current = 3;
+}
+
+message PingRequest {
+  string worker_id = 1;
+  string station_id = 2;
+  string worker_version = 3;
+}
+
+message PingResponse {
+  // Server time, so the Worker can report clock skew during later phases.
+  int64 server_time_unix_ms = 1;
+  string server_version = 2;
+}

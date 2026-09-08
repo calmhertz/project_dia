@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+// Moving completed recordings from the Worker to the Server.
+package aagasa.worker.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "aagasa/internal/gen/worker/v1;workerv1";
+
+// RecordingMetadata identifies one recording and describes its content.
+message RecordingMetadata {
+  // Deterministic identity, computed by the Worker from the pass and the
+  // file's path within it. A retry produces the same value, which is what
+  // makes an upload idempotent (spec.md section 19.3).
+  string recording_id = 1;
+
+  string pass_id = 2;
+  string worker_id = 3;
+  string station_id = 4;
+
+  // Path relative to the pass's output directory, so a pass that produces
+  // several files keeps them distinguishable.
+  string relative_path = 5;
+
+  uint64 size_bytes = 6;
+  // SHA-256 of the content, so the Server can reject a corrupted transfer.
+  string checksum_sha256 = 7;
+
+  google.protobuf.Timestamp started_at = 8;
+  google.protobuf.Timestamp finished_at = 9;
+}
+
+message UploadRecordingRequest {
+  oneof payload {
+    // Exactly one metadata message, first.
+    RecordingMetadata metadata = 1;
+    // Then the content, in chunks. One RPC still carries one whole file:
+    // this is not a resumable protocol (spec.md section 19.3).
+    bytes chunk = 2;
+  }
+}
+
+message UploadRecordingResponse {
+  string recording_id = 1;
+  // True when this call stored the content, false when the Server already
+  // held it. Either way the upload succeeded and the Worker may stop retrying.
+  bool stored = 2;
+  uint64 size_bytes = 3;
+}
+
+// ReportExecution carries what happened during a pass, so results gathered
+// during a Server outage are not lost.
+message ExecutionRecord {
+  string pass_id = 1;
+  // Worker-side execution state: completed, failed, missed or cancelled.
+  string state = 2;
+  string detail = 3;
+  google.protobuf.Timestamp recorded_at = 4;
+}
+
+message ReportExecutionsRequest {
+  string worker_id = 1;
+  repeated ExecutionRecord records = 2;
+}
+
+message ReportExecutionsResponse {
+  // Number of records the Server accepted. Re-reporting the same outcome is
+  // safe and does not create a duplicate.
+  uint32 accepted = 1;
+}

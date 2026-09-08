@@ -1,0 +1,30 @@
+# Aagasa Server: Go control plane plus the internal Python prediction service.
+# Built from the repository root: podman build -f deploy/server/Containerfile .
+
+FROM docker.io/library/golang:1.27 AS go-build
+WORKDIR /src
+COPY server/go/go.mod server/go/go.sum ./server/go/
+RUN cd server/go && go mod download
+COPY server/go ./server/go
+# aagasa-migrate shares the image so deploy.sh can apply the schema from the
+# same artefact it runs the Server from.
+RUN cd server/go && CGO_ENABLED=0 go build -o /out/aagasa-server ./cmd/aagasa-server \
+    && CGO_ENABLED=0 go build -o /out/aagasa-migrate ./cmd/aagasa-migrate
+
+FROM docker.io/library/python:3.11-slim
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY server/python /app/server/python
+RUN cd /app/server/python && uv sync --frozen --no-dev
+
+COPY --from=go-build /out/aagasa-server /usr/local/bin/aagasa-server
+COPY --from=go-build /out/aagasa-migrate /usr/local/bin/aagasa-migrate
+
+# Runs as root inside the image. Under rootless Podman -- which is the only
+# way this is deployed -- container root maps to the invoking host user, so
+# every file lands owned by that user and the bind-mounted deploy/data tree is
+# readable and writable without privilege (deploy/README.md).
+
+EXPOSE 8080 9090
+CMD ["/usr/local/bin/aagasa-server"]

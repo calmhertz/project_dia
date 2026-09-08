@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+// Internal contract between the Go control plane and the Python satellite
+// computation service. Not a public API.
+package aagasa.prediction.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "aagasa/internal/gen/prediction/v1;predictionv1";
+
+service PredictionService {
+  // Liveness/readiness probe.
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // PredictPasses computes the visible passes of one satellite over one
+  // ground station. This is the only pass predictor in Aagasa: the Server
+  // must not compute passes itself and the Worker must not invent its own
+  // schedule (spec.md section 12).
+  rpc PredictPasses(PredictPassesRequest) returns (PredictPassesResponse);
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  Status status = 1;
+  // Service build version, for operator diagnostics.
+  string version = 2;
+
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_SERVING = 1;
+    STATUS_NOT_SERVING = 2;
+  }
+}
+
+// TwoLineElements is the orbital data a prediction is computed from. The
+// caller supplies the exact element set it wants used, so a prediction is
+// reproducible against a stored TLE version.
+message TwoLineElements {
+  string line1 = 1;
+  string line2 = 2;
+}
+
+message ObserverLocation {
+  double latitude_degrees = 1;
+  double longitude_degrees = 2;
+  double altitude_m = 3;
+}
+
+message PredictPassesRequest {
+  TwoLineElements tle = 1;
+  ObserverLocation observer = 2;
+
+  // Horizon threshold: a pass begins and ends at this elevation
+  // (spec.md section 12).
+  double minimum_elevation_degrees = 3;
+
+  google.protobuf.Timestamp search_start = 4;
+  google.protobuf.Timestamp search_end = 5;
+
+  // Spacing of the pointing timeline. Zero omits the track entirely, which
+  // is what a listing view wants.
+  uint32 track_step_seconds = 6;
+
+  // Cap on returned passes. Zero applies the service default.
+  uint32 max_passes = 7;
+}
+
+// TrackPoint is one antenna pointing instruction.
+message TrackPoint {
+  google.protobuf.Timestamp at = 1;
+  double azimuth_degrees = 2;
+  double elevation_degrees = 3;
+  double range_km = 4;
+}
+
+message PredictedPass {
+  // Acquisition of signal: the satellite crosses the minimum elevation.
+  google.protobuf.Timestamp aos = 1;
+  // Time of closest approach, where elevation peaks.
+  google.protobuf.Timestamp tca = 2;
+  // Loss of signal.
+  google.protobuf.Timestamp los = 3;
+
+  double aos_azimuth_degrees = 4;
+  double tca_azimuth_degrees = 5;
+  double los_azimuth_degrees = 6;
+
+  double max_elevation_degrees = 7;
+  double duration_seconds = 8;
+
+  // Pointing timeline from AOS to LOS inclusive, empty when the caller did
+  // not ask for one.
+  repeated TrackPoint track = 9;
+}
+
+message PredictPassesResponse {
+  // Catalog number read from the supplied elements, so the caller can confirm
+  // it received predictions for the satellite it asked about.
+  int32 norad_id = 1;
+  repeated PredictedPass passes = 2;
+}

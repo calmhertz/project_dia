@@ -1,0 +1,28 @@
+[project]
+name = "aagasa-prediction"
+version = "0.1.0"
+description = "Aagasa internal satellite computation service (gRPC)"
+requires-python = ">=3.11"
+dependencies = [
+    "grpcio>=1.60",
+    "protobuf>=4.25",
+    "skyfield>=1.49",
+]
+
+[project.scripts]
+aagasa-prediction = "aagasa_prediction.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# "aagasa" holds generated protobuf code; regenerate with "make proto".
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["aagasa_prediction*", "aagasa*"]
+
+[dependency-groups]
+dev = [
+    "grpcio-tools>=1.60",
+    "pytest>=8.0",
+]
