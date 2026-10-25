@@ -1,18 +1,11 @@
 # Aagasa Architecture Baseline
 
-Status: V0 through V19 complete; V4 and V10 need a live pass to sign off.
+Status: V0 through V19 complete; V4 and V10 need a live pass to sign off. See also [acceptance.md](acceptance.md), [testing.md](testing.md), [data-model.md](data-model.md),
+[api.md](api.md), [hardware.md](hardware.md) and [passplan.md](passplan.md).
 
 This document records the reconnaissance results and the repository structure that all
 later phases build on. It refines nothing in `spec.md`; where the two disagree,
 `spec.md` wins.
-
-Since this was written, the development environment (`scripts/dev-env.sh`), its
-simulated-hardware stand-ins, and the whole-system test harness
-(`integration-test.sh`, `acceptance.sh`, `failure-drills.sh`) were removed in an
-operations cleanup. The project now runs exclusively through the production
-deployment (`./deploy.sh` on real hardware); sections below that describe those
-removed pieces are historical record only. See [testing.md](testing.md) and
-[hardware.md](hardware.md) for the current path.
 
 ---
 
@@ -36,11 +29,9 @@ DIA_Specs/                        # repository root
 ├── client/
 │   ├── client-spec.md
 │   └── (Flutter app created in V1)
-├── deployment/
-│   ├── compose.yaml              # the whole stack, one `deploy.sh server|worker|both`
-│   ├── server/                   # Containerfile, Containerfile.prediction
-│   ├── worker/
-│   └── nginx/                    # reverse proxy: web on /, API on /api
+├── deploy/
+│   ├── server/                   # Containerfile, Kube Play YAML, Quadlet units
+│   └── worker/
 └── REFERENCE/                    # read-only prior implementation, never built or imported
 ```
 
@@ -80,8 +71,7 @@ Datastores (Server): PostgreSQL authoritative for scheduling and conflict preven
 MongoDB for flexible pass/telemetry documents, Redis for sessions and ephemeral state
 only, filesystem for recordings and uploaded pipeline JSON.
 
-Deployment for both planes: Podman + Podman Compose, driven by a single
-`deploy.sh` (server|worker|both|down).
+Deployment for both planes: Podman + Podman Kube Play YAML + systemd Quadlet.
 
 ### Boundaries that must not blur
 
@@ -139,8 +129,8 @@ cd worker && uv sync && uv run pytest
 cd client && flutter pub get && flutter analyze && flutter test
 
 # Deployment
-podman build -f deployment/server/Containerfile -t aagasa-server:latest .
-podman build -f deployment/worker/Containerfile -t aagasa-worker:latest .
+podman build -f deploy/server/Containerfile -t aagasa-server:latest .
+podman build -f deploy/worker/Containerfile -t aagasa-worker:latest .
 ```
 
 Generated protobuf code is gitignored, so `make proto` is required after a clone.
@@ -152,8 +142,7 @@ Generated protobuf code is gitignored, so `make proto` is required after a clone
 `REFERENCE/project_dia` is a complete, working ground station built for the Dhritvan
 Space Lab (SJCIT): FastAPI + SQLite server, plain-loop Python worker, REST with a
 long-poll mission endpoint, `X-Worker-Token` shared secret, Argon2id hashing, Podman
-Kube Play + Quadlet deployment. The replacement is a single idempotent `deploy.sh`
-over Podman Compose (plan.md V18); the reference's deployment model was not reused.
+Kube Play + Quadlet deployment.
 
 Its architecture differs from Aagasa deliberately: no Go, no PostgreSQL/MongoDB/Redis,
 no gRPC, no approval workflow with reservation buffers, and the worker predicts its own
@@ -169,7 +158,7 @@ passes. Per `spec.md` §25 it is input, not the target design.
 | `src/project_dia/predictor.py:39-76` | Skyfield `find_events` rise/culminate/set triple extraction, `wgs84.latlon` observer, altaz derivation | V6 |
 | `src/project_dia/security.py:9` | Argon2id parameters: `time_cost=3, memory_cost=65536, parallelism=4, hash_len=32, salt_len=16` | V3 |
 | `src/project_dia/tle.py:23-31` | CelesTrak `gp.php?CATNR=<id>&FORMAT=TLE` request shape and TLE line regexes. Endpoint behaviour must still be re-verified live per `spec.md` §11.3 | V5 |
-| `Containerfile_worker`, `worker.yaml`, `*.kube` | Reference deployment layout (Quadlet + Kube Play); superseded by Podman Compose in V18; the rotator `/dev/ttyUSB0` and SDR `/dev/bus/usb` device mounts carried over into `deployment/compose.yaml` | V1, V18 |
+| `Containerfile_worker`, `worker.yaml`, `*.kube` | Quadlet + Kube Play layout; `/dev/ttyUSB0` and `/dev/bus/usb` device mounts for rotator and SDR | V1, V18 |
 
 ### Adapt
 
@@ -276,9 +265,8 @@ so pod start order does not matter. Datastores must be reachable at startup.
   destinations as explicit empty states; Public History and Administration arrive
   with roles.
 - Podman image builds were not executed. The Containerfiles are written but unbuilt;
-  the Worker image additionally needs `deployment/worker/satdump.deb`, which is not
-  committed. The Compose stack and `deploy.sh` were validated with
-  `podman-compose config`, not a live run; no host has had containers started on it.
+  the Worker image additionally needs `deploy/worker/satdump.deb`, which is not
+  committed. Quadlet units were not installed on a host.
 
 ---
 
@@ -1589,20 +1577,16 @@ live: TLS 1.3 on the gRPC listener, a real login over HTTPS.
 **Kube Play's `secretKeyRef` reads a Kubernetes Secret, not a Podman secret.**
 The documented `podman secret create name -` from plain text is rejected at
 pod start with "not valid JSON/YAML". The README's own instructions could
-never have worked. This is why V18 abandoned Kube Play for Podman Compose,
-where secrets are plain environment variables from a gitignored `deployment/.env`
-generated by `deploy.sh`.
+never have worked.
 
 **The Server pod could not reach the databases.** They are separate pods so
 they restart independently, which means `127.0.0.1` inside the Server is not
-the host. Under Podman Compose the Server reaches the datastores by service
-name on the compose network (no host networking; the Network table in
-deployment/README.md lists what is actually published).
+the host. The Server pod now uses `hostNetwork`, which also puts 8080 and
+9090 where the browser and the station expect them.
 
-**The TLS key was unreadable.** A root-owned 0600 key stops a service that
-drops privileges. The deployment is rootless now, so container root maps to
-the invoking user and the key, owned by that user at 0600, is readable with no
-uid juggling. Ownership is documented, not provisioned.
+**The TLS key was unreadable.** The image runs as uid 10001 and drops
+privileges, so a root-owned 0600 key stops the service. Ownership is now part
+of provisioning and part of the documentation.
 
 **The prediction image would never have started.** Its command was `uv run`,
 which wants a writable cache under the service user's home and does not have
@@ -1612,21 +1596,19 @@ container that cannot start when the network is down.
 
 ### What a clean machine now does
 
-`deploy.sh server|worker|both` takes a host from nothing to healthy, all as
-the invoking user and all inside `deployment/`: a directory layout (`data/`,
-`tls/`, `web/`) that the containers bind mount, secrets that do not exist yet
-in a gitignored `deployment/.env`, a self-signed certificate so the station is
-encrypted from the first minute, images built, the schema migrated, services
-started through Podman Compose, `readyz` polled. Idempotent, and it never
+`deploy/scripts/provision.sh server|worker` takes a host from nothing to
+healthy: directories, secrets that do not exist yet, a self-signed
+certificate so the station is encrypted from the first minute, Quadlet units,
+a capped journal, services started, `readyz` polled. Idempotent, and it never
 regenerates an existing secret - rotating the Worker's shared secret behind
 its back would take the station off the air.
 
-Ordering is explicit: the compose `depends_on` starts the datastores, the
-migrator and then the Server; nginx intends to serve the web client once the
-Server is ready. The Worker is independent of the Server service - it executes
-an approved schedule through a Server outage and starts whether or not the
-control plane is reachable. `restart: unless-stopped` brings a station that
-reboots while its databases initialise back up rather than stranding it.
+Ordering is explicit: the Server `Requires=` and is `After=` the datastores.
+The Worker depends on neither, because it executes an approved schedule
+through a Server outage and must start whether or not the control plane is
+reachable. Both restart with a pause and no start limit, so a station that
+reboots while its databases initialise comes up rather than exhausting its
+budget.
 
 ### Backup keeps what cannot be rebuilt
 
@@ -1643,16 +1625,14 @@ possibly holding plans the restored Server has never seen.
 
 ### Verified, and what was not
 
-Verified: the scripts and images have been exercised up to
-`podman-compose config` resolving the full stack with mandatory
-`AAGASA_POSTGRES_PASSWORD` and `AAGASA_WORKER_SHARED_SECRET` present and
-failing fast without them; the Go binaries (server and migrator) build
-clean. The stack is rootless: containers run as the invoking user, services
-join the named compose network, all data lives under `deployment/`. Not verified
-live: the Worker image, because it needs a SatDump package that is not
-committed; a genuinely clean machine, because this one is not; and a real
-certificate, because a self-signed one is what a fresh station gets. A live
-containerised run to `status: ready` remains to be done on a station.
+A full containerised deployment was brought up on shifted ports and reached
+`status: ready` with all four components green over HTTPS, then torn down;
+the running development environment was untouched throughout. The images
+build. The exit criterion is met for the server role.
+
+Not verified: the Worker image, because it needs a SatDump package that is
+not committed; a genuinely clean machine, because this one is not; and a real
+certificate, because a self-signed one is what a fresh station gets.
 
 ### Verification
 
@@ -1665,9 +1645,8 @@ configured, and refused when the material cannot be read.
 ## 32. V19 acceptance pass
 
 The seven critical scenarios, run against a live deployment rather than
-argued from the code. The run itself is no longer reproduced (the acceptance
-harness was removed in the ops cleanup), but its result stands:
-**28 passed, 0 failed, 4 deferred.
+argued from the code. Full result in [acceptance.md](acceptance.md):
+**28 passed, 0 failed, 4 deferred.**
 
 ### What the run actually established
 

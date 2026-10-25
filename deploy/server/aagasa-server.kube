@@ -1,0 +1,25 @@
+[Unit]
+Description=Aagasa Server (control plane)
+After=network-online.target
+Wants=network-online.target
+
+# The Server refuses to start without its datastores, so ordering here saves
+# a restart loop on every boot. Requires, not Wants: running without them is
+# not a state worth being in.
+Requires=aagasa-databases.service
+After=aagasa-databases.service
+
+# A boot where the databases are still initialising should not exhaust the
+# restart budget and leave the station down. These belong in [Unit]; systemd
+# ignores them under [Service].
+StartLimitIntervalSec=0
+
+[Kube]
+Yaml=/etc/containers/systemd/server.yaml
+
+[Service]
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -53,7 +53,7 @@ configuration is refused at startup rather than quietly serving plaintext, and
 an unreadable path fails immediately.
 
 The Worker sends its shared secret on every gRPC call, so a deployment across
-any untrusted network must have this on. See deployment/README.md.
+any untrusted network must have this on. See deploy/README.md.
 
 ### Browser clients (CORS)
 

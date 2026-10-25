@@ -113,8 +113,8 @@ fi
 
 say "Containers"
 # Podman runs the datastores in development and the whole deployment in
-# production; podman-compose drives the production stack (spec.md section 24).
-install_packages podman podman-compose
+# production (spec.md section 24).
+install_packages podman
 # Rootless podman needs subuid/subgid ranges; without them every container
 # fails with a mapping error that reads like a permissions bug. Checked even
 # in check mode, because it is exactly the sort of thing that is missing.
@@ -284,10 +284,14 @@ if [ "$ROLE" != server ]; then
     else
         gap "satdump"
         note "SatDump is not in either distribution's repositories and is not"
-        note "ours to redistribute. For the containerised deployment, download"
-        note "the .deb release package for the target architecture to"
-        note "deployment/worker/satdump.deb (deployment/README.md). Without it"
-        note "the Worker image cannot be built and the station cannot record."
+        note "ours to redistribute. Install it from:"
+        note "  https://github.com/SatDump/SatDump/releases"
+        note "On Ubuntu take the .deb; on Fedora build from source or use the"
+        note "AppImage. The Worker finds it on PATH and reads its pipeline"
+        note "directory, so nothing else needs configuring."
+        note ""
+        note "Without SatDump the station cannot record, but everything else"
+        note "runs: scripts/dev-env.sh substitutes a stand-in (docs/testing.md)."
     fi
 fi
 
@@ -326,12 +330,8 @@ cat <<NEXT
 
 Next:
   source ${profile:-~/.bashrc}
-  make test                      # unit tests, no databases or hardware needed
-  make build && ./deploy.sh both # the whole stack on this host, real devices
-
-Deployment needs one more thing that package managers cannot supply: download
-the SatDump release package for this architecture to deployment/worker/satdump.deb
-(deployment/README.md).
+  make test                      # every component, no databases needed
+  scripts/dev-env.sh up          # a complete environment, simulated hardware
 
 If you are on the station host, plug in the rotator and the dongle and check
 them with:

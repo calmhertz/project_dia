@@ -1,0 +1,20 @@
+{
+    "noaa_apt": {
+        "name": "NOAA APT (simulated)",
+        "live": true,
+        "frequencies": [137100000, 137912500, 137620000],
+        "work": {}
+    },
+    "meteor_m2-x_lrpt": {
+        "name": "METEOR-M2x LRPT (simulated)",
+        "live": true,
+        "frequencies": [137100000, 137900000],
+        "work": {}
+    },
+    "noaa_hrpt": {
+        "name": "NOAA HRPT (simulated)",
+        "live": true,
+        "frequencies": [1698000000, 1707000000],
+        "work": {}
+    }
+}

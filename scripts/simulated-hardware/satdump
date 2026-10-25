@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""A stand-in for SatDump, for running Aagasa without a radio.
+
+It accepts the two invocations the Worker makes - `live <pipeline> <output>`
+and `record <output>` - writes plausible output, and keeps running until it
+is stopped, exactly as the real binary does. Nothing here decodes anything;
+the point is that the surrounding system can be exercised end to end when no
+hardware is attached (plan.md V17).
+"""
+
+import os
+import sys
+import time
+
+# Roughly the size a short baseband capture produces, so size reporting and
+# upload chunking are exercised rather than trivially satisfied.
+SAMPLE_BYTES = 512 * 1024
+
+
+def output_directory(argv: list[str]) -> str | None:
+    if not argv:
+        return None
+    # live <pipeline> <output> ...   |   record <output> ...
+    if argv[0] == "live" and len(argv) >= 3:
+        return argv[2]
+    if argv[0] == "record" and len(argv) >= 2:
+        return argv[1]
+    return None
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    if argv and argv[0] == "--version":
+        print("SatDump v1.2.2 (simulated)")
+        return 0
+
+    destination = output_directory(argv)
+    if destination is None:
+        print(f"simulated satdump: unrecognised arguments {argv}", file=sys.stderr)
+        return 2
+
+    # `record` names a file prefix rather than a directory.
+    directory = destination if argv[0] == "live" else os.path.dirname(destination)
+    os.makedirs(directory or ".", exist_ok=True)
+
+    name = "product.png" if argv[0] == "live" else os.path.basename(destination) + ".s16"
+    path = os.path.join(directory or ".", name)
+    with open(path, "wb") as handle:
+        handle.write(os.urandom(SAMPLE_BYTES))
+
+    print(f"simulated satdump writing {path}", flush=True)
+
+    # Run until stopped, like the real thing. The Worker bounds the run and
+    # terminates it at the end of the recording window.
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

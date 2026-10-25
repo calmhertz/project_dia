@@ -138,10 +138,8 @@ throughout, because a failure safing one device must not skip another.
 | `AAGASA_SATDUMP_BIN` | `satdump` | |
 | `AAGASA_SATDUMP_PIPELINES_DIR` | unset | Unset searches the standard locations |
 
-Deployment maps `/dev/ttyUSB0` and `/dev/bus/usb` into the Worker container;
-see `deployment/compose.yaml`. Access is decided by the host user's groups
-(`dialout`), as configured by `scripts/install-dependencies.sh`; the container
-runs as root, which rootless Podman maps back to that same user.
+Deployment maps `/dev/ttyUSB0` and `/dev/bus/usb` into the Worker pod; see
+`deploy/worker/worker.yaml`.
 
 ## Verified, and not
 
@@ -237,23 +235,66 @@ pass was reported failed rather than falsely completed.
 - The V10 exit criterion, a real pass reaching `COMPLETED` with a decoded
   product.
 
-## Running the whole stack
-
-Use the production deployment: build the web client and bring the stack up on
-the station host with the rotator and dongle attached.
+## Running the whole stack locally
 
 ```sh
-make build                # builds the server, prediction, worker and web client
-./deploy.sh both          # everything on one host, real devices
+# Databases
+podman run -d --name aagasa-pg -e POSTGRES_USER=aagasa -e POSTGRES_PASSWORD=aagasa \
+  -e POSTGRES_DB=aagasa -p 5432:5432 docker.io/library/postgres:17-alpine
+podman run -d --name aagasa-redis -p 6379:6379 docker.io/library/redis:7-alpine
+podman run -d --name aagasa-mongo -p 27017:27017 docker.io/library/mongo:7
+
+export AAGASA_POSTGRES_URL='postgres://aagasa:aagasa@127.0.0.1:5432/aagasa?sslmode=disable'
+export AAGASA_REDIS_URL='redis://127.0.0.1:6379/0'
+export AAGASA_MONGO_URL='mongodb://127.0.0.1:27017'
+export AAGASA_WORKER_SHARED_SECRET='<at least 32 characters>'
+export AAGASA_RECORDINGS_DIR="$HOME/.local/share/aagasa/recordings"
+export AAGASA_PIPELINES_DIR="$HOME/.local/share/aagasa/pipelines"
+
+cd server/go && go run ./cmd/aagasa-migrate up && go run ./cmd/aagasa-migrate mongo-init
+cd server/python && uv run aagasa-prediction &     # gRPC on 127.0.0.1:9091
+cd server/go && go run ./cmd/aagasa-server &       # HTTP 8080, gRPC 9090
+cd client && flutter run -d chrome --dart-define=AAGASA_SERVER_URL=http://127.0.0.1:8080
 ```
 
-`deploy/README.md` covers prerequisites (generated protobuf stubs, the built
-client, `deployment/worker/satdump.deb`) and the whole lifecycle.
+Sign in as `root` / `toor`; the Server requires a password change before
+anything else works, then Root runs first-run setup.
 
-Sign in as `root` / `toor` at <http://127.0.0.1:50000>; the Server requires a
-password change before anything else works, then Root runs first-run setup.
+The shared secret is a real credential: generate one rather than reusing the
+example, and never commit it.
 
-The Worker registers with the Server on its own; watch it with
-`podman logs -f aagasa-worker`. `aagasa-hardware status` reports the rotator
-and radio the same way it did on the bare host:
-`podman exec aagasa-worker uv run --frozen aagasa-hardware status`.
+Serving the client from anywhere other than localhost also needs
+`AAGASA_ALLOWED_ORIGINS` set to that origin, or the browser blocks every call.
+
+## Failure drills
+
+`scripts/failure-drills.sh` takes the running system apart and checks it puts
+itself back together (plan.md V16). It stops and starts processes and the
+database container; it never deletes data.
+
+```sh
+# Point it at how to restart things, from a file: the drill kills by pattern
+# and a command line naming them would match itself.
+cat > /tmp/drill-env.sh <<'ENV'
+export AAGASA_SERVER_CMD="source /path/to/env.sh; exec /path/to/aagasa-server"
+export AAGASA_WORKER_CMD="cd worker && source /path/to/worker-env.sh && exec uv run aagasa-worker"
+export AAGASA_WORKER_LOG=/path/to/worker.log
+ENV
+source /tmp/drill-env.sh && scripts/failure-drills.sh
+```
+
+It covers the database going away and returning, the Server crashing while
+the Worker keeps executing, and the Worker crashing and reloading its durable
+state. Hardware and provider failures are covered by unit tests instead,
+where they can be provoked honestly.
+
+## Simulated hardware
+
+When no rotator or dongle is attached, `scripts/dev-env.sh` runs the Worker
+against stand-ins that behave like the real devices: a pseudo-terminal
+answering G-550 commands, a SatDump that writes plausible output, and an
+`rtl_test` reporting one device. See docs/testing.md.
+
+Use `AAGASA_HARDWARE=real` to run the same environment against the attached
+hardware instead. Simulated hardware proves the software is correct; only the
+real thing proves the station is.

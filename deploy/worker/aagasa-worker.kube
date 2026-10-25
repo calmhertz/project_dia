@@ -1,0 +1,20 @@
+[Unit]
+Description=Aagasa Worker (ground-station edge executor)
+After=network-online.target
+Wants=network-online.target
+
+# Deliberately no dependency on the Server: the Worker executes an approved
+# schedule through a Server outage, so it must start whether or not the
+# control plane is reachable (spec.md section 6.1).
+StartLimitIntervalSec=0
+
+[Kube]
+Yaml=/etc/containers/systemd/worker.yaml
+
+[Service]
+# The Worker must come back by itself after a crash or a station power cut.
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

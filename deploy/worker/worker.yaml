@@ -1,0 +1,77 @@
+# Aagasa Worker pod. Install to /etc/containers/systemd/ with worker.kube.
+#
+# Device access is explicit: the rotator serial port and the RTL-SDR USB bus
+# must both be mapped, and the pod needs privileges to reach them.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: aagasa-worker
+  labels:
+    app: aagasa-worker
+spec:
+  containers:
+    - name: worker
+      image: localhost/aagasa-worker:latest
+      env:
+        - name: AAGASA_LOG_LEVEL
+          value: "info"
+        # The Server resolves the identifiers from this name.
+        - name: AAGASA_WORKER_NAME
+          value: "worker-1"
+        - name: AAGASA_SERVER_GRPC_ADDRESS
+          value: "server.example.internal:9090"
+        - name: AAGASA_SERVER_TLS_ENABLED
+          value: "true"
+        - name: AAGASA_STATE_DIR
+          value: "/var/lib/aagasa/state"
+        - name: AAGASA_RECORDINGS_DIR
+          value: "/var/lib/aagasa/recordings"
+        - name: AAGASA_ROTATOR_SERIAL_PORT
+          value: "/dev/ttyUSB0"
+        - name: AAGASA_ROTATOR_BAUD_RATE
+          value: "9600"
+        - name: AAGASA_ROTATOR_PARK_AZIMUTH
+          value: "0"
+        - name: AAGASA_ROTATOR_PARK_ELEVATION
+          value: "0"
+        - name: AAGASA_SDR_DEVICE_INDEX
+          value: "0"
+        - name: AAGASA_SATDUMP_BIN
+          value: "satdump"
+        - name: AAGASA_HEARTBEAT_INTERVAL_SECONDS
+          value: "5"
+        - name: AAGASA_WORKER_SHARED_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: aagasa-worker-shared-secret
+              key: value
+      securityContext:
+        # Required to open the rotator serial port and the RTL-SDR.
+        privileged: true
+      volumeMounts:
+        - name: state
+          mountPath: /var/lib/aagasa/state
+        - name: recordings
+          mountPath: /var/lib/aagasa/recordings
+        - name: rotator
+          mountPath: /dev/ttyUSB0
+        - name: usb
+          mountPath: /dev/bus/usb
+
+  volumes:
+    - name: state
+      hostPath:
+        path: /var/lib/aagasa/state
+        type: DirectoryOrCreate
+    - name: recordings
+      hostPath:
+        path: /var/lib/aagasa/recordings
+        type: DirectoryOrCreate
+    - name: rotator
+      hostPath:
+        path: /dev/ttyUSB0
+        type: CharDevice
+    - name: usb
+      hostPath:
+        path: /dev/bus/usb
+        type: Directory
