@@ -30,7 +30,7 @@ Global non-negotiables include:
 - VHF and UHF cannot be used simultaneously
 - SatDump is the recording/processing engine
 - Python + `uv`
-- Podman + Podman Compose (rootless)
+- Podman + Podman Kube Play + systemd Quadlet
 - latest-state reconciliation rather than a complex event-sourcing system
 
 ---
@@ -79,8 +79,8 @@ Global non-negotiables include:
 - RTL-SDR tooling required by the chosen SatDump/SDR workflow
 - SatDump
 - Podman
-- Podman Compose (`deployment/compose.yaml`), rootless
-- a single idempotent `deploy.sh server|worker|both|down`
+- Podman Kube Play YAML
+- systemd Quadlet
 
 Avoid unnecessary Python frameworks and abstractions.
 
@@ -644,7 +644,8 @@ Failure tests:
 Worker deployment must support:
 
 - Podman
-- Podman Compose (`deployment/compose.yaml`), rootless
+- Podman Kube Play
+- systemd Quadlet
 
 The Worker should restart automatically on process/container failure.
 

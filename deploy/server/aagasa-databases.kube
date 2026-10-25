@@ -1,0 +1,14 @@
+[Unit]
+Description=Aagasa datastores (PostgreSQL, Redis, MongoDB)
+After=network-online.target
+Wants=network-online.target
+
+[Kube]
+Yaml=/etc/containers/systemd/databases.yaml
+
+[Service]
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

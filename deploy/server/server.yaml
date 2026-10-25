@@ -1,0 +1,126 @@
+# Aagasa Server pod. Install to /etc/containers/systemd/ with server.kube.
+# Secrets come from the "aagasa-server" Podman secret set, never from this file.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: aagasa-server
+  labels:
+    app: aagasa-server
+spec:
+  # The Server shares the host's network namespace.
+  #
+  # It is a separate pod from the datastores so the two restart
+  # independently, and a separate pod means 127.0.0.1 inside it is not the
+  # host: without this the database URLs cannot resolve at all. Sharing the
+  # host namespace also puts 8080 and 9090 directly on the host, which is
+  # where the browser client and the ground station expect them.
+  hostNetwork: true
+
+  containers:
+    - name: prediction
+      image: localhost/aagasa-prediction:latest
+      env:
+        - name: AAGASA_PREDICTION_ADDRESS
+          value: "127.0.0.1:9091"
+        - name: AAGASA_LOG_LEVEL
+          value: "info"
+
+    - name: server
+      image: localhost/aagasa-server:latest
+      env:
+        - name: AAGASA_ENV
+          value: "production"
+        - name: AAGASA_LOG_LEVEL
+          value: "info"
+        - name: AAGASA_HTTP_ADDRESS
+          value: ":8080"
+        - name: AAGASA_GRPC_ADDRESS
+          value: ":9090"
+        - name: AAGASA_PREDICTION_ADDRESS
+          value: "127.0.0.1:9091"
+        - name: AAGASA_MONGO_DATABASE
+          value: "aagasa"
+        - name: AAGASA_RECORDINGS_DIR
+          value: "/var/lib/aagasa/recordings"
+        - name: AAGASA_PIPELINES_DIR
+          value: "/var/lib/aagasa/pipelines"
+        - name: AAGASA_SESSION_TTL
+          value: "43200"
+        - name: AAGASA_TLE_REFRESH_ENABLED
+          value: "true"
+        # Both listeners are encrypted when this material is present. The
+        # Worker sends its shared secret on every gRPC call, so an unencrypted
+        # link would put that credential on the wire.
+        - name: AAGASA_TLS_CERT_FILE
+          value: "/etc/aagasa/tls/tls.crt"
+        - name: AAGASA_TLS_KEY_FILE
+          value: "/etc/aagasa/tls/tls.key"
+        # Origins the browser client is served from. Without this the browser
+        # blocks every call it makes.
+        - name: AAGASA_ALLOWED_ORIGINS
+          value: ""
+
+        - name: AAGASA_POSTGRES_URL
+          valueFrom:
+            secretKeyRef:
+              name: aagasa-postgres-url
+              key: value
+        - name: AAGASA_REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: aagasa-redis-url
+              key: value
+        - name: AAGASA_MONGO_URL
+          valueFrom:
+            secretKeyRef:
+              name: aagasa-mongo-url
+              key: value
+        - name: AAGASA_WORKER_SHARED_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: aagasa-worker-shared-secret
+              key: value
+      # No hostPort mappings: with hostNetwork the container ports are the
+      # host's already, and declaring both is a contradiction Podman refuses.
+      ports:
+        - containerPort: 8080
+        - containerPort: 9090
+      volumeMounts:
+        - name: recordings
+          mountPath: /var/lib/aagasa/recordings
+        - name: pipelines
+          mountPath: /var/lib/aagasa/pipelines
+        - name: tls
+          mountPath: /etc/aagasa/tls
+          readOnly: true
+      # scheme: HTTPS because the listener is encrypted; the probe would
+      # otherwise speak plaintext to a TLS port and report a healthy service
+      # as dead.
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8080
+          scheme: HTTPS
+        periodSeconds: 30
+      readinessProbe:
+        httpGet:
+          path: /readyz
+          port: 8080
+          scheme: HTTPS
+        periodSeconds: 10
+
+  volumes:
+    - name: recordings
+      hostPath:
+        path: /var/lib/aagasa/recordings
+        type: DirectoryOrCreate
+    - name: pipelines
+      hostPath:
+        path: /var/lib/aagasa/pipelines
+        type: DirectoryOrCreate
+    # Certificate and key, owner-readable only. Renewing them means replacing
+    # these files and restarting the service.
+    - name: tls
+      hostPath:
+        path: /etc/aagasa/tls
+        type: Directory

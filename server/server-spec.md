@@ -49,8 +49,8 @@ Internal Python service:
 Deployment:
 
 - Podman
-- Podman Compose (`deployment/compose.yaml`), rootless
-- a single idempotent `deploy.sh server|worker|both|down`
+- Podman Kube Play
+- systemd Quadlet
 
 ---
 
@@ -814,8 +814,8 @@ Avoid race-prone application-only conflict checks.
 Server deployment should follow the same Podman-oriented project strategy:
 
 - Podman
-- Podman Compose (`deployment/compose.yaml`), rootless
-- a single idempotent `deploy.sh server|worker|both|down`
+- Kube Play YAML
+- systemd Quadlet
 
 Configuration/secrets must come from deployment configuration/environment/secret mechanisms.
 

@@ -1,0 +1,82 @@
+# The datastores the Aagasa Server depends on.
+#
+# Separate from the Server pod so the two restart independently: a Server
+# upgrade must not take the databases down with it, and the databases coming
+# back must not require the Server to be reinstalled.
+#
+# Data lives on the host under /var/lib/aagasa, which is what gets backed up
+# (deploy/README.md). Ports bind to the loopback interface only: nothing here
+# is meant to be reachable from the network.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: aagasa-databases
+  labels:
+    app: aagasa-databases
+spec:
+  containers:
+    - name: postgres
+      image: docker.io/library/postgres:17-alpine
+      env:
+        - name: POSTGRES_DB
+          value: "aagasa"
+        - name: POSTGRES_USER
+          value: "aagasa"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: aagasa-postgres-password
+              key: value
+        # Keeps the data directory a plain subdirectory, so a host mount with
+        # lost+found in it does not stop initdb.
+        - name: PGDATA
+          value: "/var/lib/postgresql/data/pgdata"
+      ports:
+        - containerPort: 5432
+          hostPort: 5432
+          hostIP: "127.0.0.1"
+      volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+      livenessProbe:
+        exec:
+          command: ["pg_isready", "-U", "aagasa"]
+        periodSeconds: 30
+
+    - name: redis
+      image: docker.io/library/redis:7-alpine
+      # Sessions only, and they are rebuildable by signing in again, so
+      # persistence is deliberately off.
+      args: ["redis-server", "--save", "", "--appendonly", "no"]
+      ports:
+        - containerPort: 6379
+          hostPort: 6379
+          hostIP: "127.0.0.1"
+      livenessProbe:
+        exec:
+          command: ["redis-cli", "ping"]
+        periodSeconds: 30
+
+    - name: mongo
+      image: docker.io/library/mongo:7
+      ports:
+        - containerPort: 27017
+          hostPort: 27017
+          hostIP: "127.0.0.1"
+      volumeMounts:
+        - name: mongo-data
+          mountPath: /data/db
+      livenessProbe:
+        exec:
+          command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+        periodSeconds: 30
+
+  volumes:
+    - name: postgres-data
+      hostPath:
+        path: /var/lib/aagasa/postgres
+        type: DirectoryOrCreate
+    - name: mongo-data
+      hostPath:
+        path: /var/lib/aagasa/mongo
+        type: DirectoryOrCreate

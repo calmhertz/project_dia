@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""A stand-in for rtl_test, reporting one device in the real format.
+
+The Worker only reads the device line, so this is enough to make the SDR
+probe succeed with no dongle attached (plan.md V17).
+"""
+
+import sys
+
+print("Found 1 device(s):", file=sys.stderr)
+print("  0:  Realtek, RTL2838UHIDIR, SN: simulated", file=sys.stderr)
+print("", file=sys.stderr)
+print("Using device 0: Generic RTL2832U OEM", file=sys.stderr)
+sys.exit(0)

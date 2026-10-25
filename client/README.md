@@ -15,18 +15,11 @@ or an external TLE provider.
 flutter pub get
 flutter analyze
 flutter test
-flutter run -d chrome
+flutter run -d chrome --dart-define=AAGASA_SERVER_URL=http://127.0.0.1:8080
 ```
 
-The endpoint is defined once, in `lib/config/app_config.dart`, and chosen by
-platform at `ApiClient.defaultBaseUrl`:
-
-- **web** uses the page's own origin. nginx serves the built client and
-  proxies `/api` from the same origin, so the browser never sees CORS
-  (port 50000 in a `deploy.sh` deployment).
-- **android/iOS/desktop** use `AAGASA_SERVER_URL`, which defaults to the
-  station at `http://127.0.0.1:8080`, overridable at build time:
-  `flutter run -d linux --dart-define=AAGASA_SERVER_URL=https://host:9090`
+The Server base URL comes from the `AAGASA_SERVER_URL` compile-time define and
+defaults to `http://127.0.0.1:8080`.
 
 ## V1 scope
 
