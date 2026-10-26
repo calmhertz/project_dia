@@ -1,10 +1,3 @@
-// Command aagasa-rootpw resets the Root password from the server host.
-//
-// spec.md section 17.1 requires a server-side recovery mechanism for a
-// compromise or lockout, usable when the UI is unavailable.
-//
-// The new password is read from the terminal without echo, or from stdin when
-// piped, so it never appears in shell history, process arguments or logs.
 package main
 
 import (
@@ -74,8 +67,6 @@ func run() error {
 		return err
 	}
 
-	// Recovery is security-relevant, so it is auditable. The password is not
-	// part of the record.
 	if _, err := repo.AppendAudit(ctx, domain.AuditRecord{
 		ActorUserID: &root.ID,
 		Action:      "auth.root_password_reset_via_cli",
@@ -90,8 +81,6 @@ func run() error {
 	return nil
 }
 
-// readPassword prompts without echo on a terminal, and reads a single line
-// when stdin is piped.
 func readPassword() (string, error) {
 	if term.IsTerminal(int(os.Stdin.Fd())) {
 		fmt.Fprint(os.Stderr, "New root password: ")

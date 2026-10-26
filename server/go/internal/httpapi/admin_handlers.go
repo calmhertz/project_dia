@@ -10,11 +10,6 @@ import (
 	"aagasa/internal/store"
 )
 
-// Read-only operational views for Admin and Root (V14).
-//
-// These disclose station operation, not station configuration: serial ports,
-// gains and device identifiers belong to the Root surface in V15
-// (client-spec section 4).
 
 type stationStatusResponse struct {
 	StationID           string    `json:"station_id"`
@@ -29,8 +24,6 @@ type stationStatusResponse struct {
 	AntennaDescriptions []string  `json:"antenna_descriptions"`
 }
 
-// handleStationStatus reports where the station is and what it is listening
-// on, which an Admin needs to interpret every other operational screen.
 func (s *Server) handleStationStatus(w http.ResponseWriter, r *http.Request) {
 	station, ok := s.primaryStation(w, r)
 	if !ok {
@@ -68,9 +61,6 @@ type schedulingConfigResponse struct {
 	EffectiveFrom            time.Time `json:"effective_from"`
 	CreatedAt                time.Time `json:"created_at"`
 
-	// Pending is a saved change that has not taken effect yet. Without it a
-	// Root who shortens the lead time sees the old values return and
-	// concludes the save was lost.
 	Pending *pendingConfigView `json:"pending,omitempty"`
 }
 
@@ -84,11 +74,6 @@ type pendingConfigView struct {
 	EffectiveFrom            time.Time `json:"effective_from"`
 }
 
-// handleGetSchedulingConfig returns the configuration in force now.
-//
-// Readable by Admin, writable only by Root: an Admin has to know the rules
-// their approvals are judged by, which is not the same as being able to
-// change them (spec.md section 13.6).
 func (s *Server) handleGetSchedulingConfig(w http.ResponseWriter, r *http.Request) {
 	station, ok := s.primaryStation(w, r)
 	if !ok {
@@ -135,8 +120,6 @@ func (s *Server) handleGetSchedulingConfig(w http.ResponseWriter, r *http.Reques
 	writeJSON(s.logger, w, http.StatusOK, response)
 }
 
-// staleTLEHours is when orbital data stops being good enough to plan with.
-// SGP4 accuracy degrades over days, so a week is already a warning.
 const staleTLEHours = 72
 
 type tleStatusEntry struct {
@@ -158,10 +141,6 @@ type tleStatusResponse struct {
 	StaleCount    int              `json:"stale_count"`
 }
 
-// handleTLEStatus reports the freshness of the whole catalogue's orbital data.
-//
-// An Admin can refresh TLEs, so they need to see which satellites are stale
-// or have never had data at all; a per-satellite page cannot answer that.
 func (s *Server) handleTLEStatus(w http.ResponseWriter, r *http.Request) {
 	satellites, err := s.repo.ListSatellites(r.Context())
 	if err != nil {
@@ -187,8 +166,6 @@ func (s *Server) handleTLEStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		record, present := latest[satellite.ID]
 		if !present {
-			// Never had orbital data. Distinct from stale, and distinct from
-			// an error: the catalogue entry is real, the data is not there.
 			response.MissingCount++
 			response.Satellites = append(response.Satellites, entry)
 			continue
@@ -211,8 +188,6 @@ func (s *Server) handleTLEStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(s.logger, w, http.StatusOK, response)
 }
 
-// primaryStation resolves the single station this deployment runs, answering
-// the caller itself when there is none yet.
 func (s *Server) primaryStation(w http.ResponseWriter, r *http.Request) (domain.Station, bool) {
 	stations, err := s.repo.ListStations(r.Context())
 	if err != nil {

@@ -89,7 +89,6 @@ def _print_status(station: Station) -> int:
     print(f"satdump:  {_state(status.satdump_available, status.satdump_error, status.satdump_path)}")
     print(f"pipelines: {status.pipeline_count}")
     print(f"capture active: {status.capture_active}")
-    # Exit non-zero if anything is missing, so a deployment check can use it.
     ready = status.rotator_available and status.sdr_available and status.satdump_available
     return 0 if ready else 1
 

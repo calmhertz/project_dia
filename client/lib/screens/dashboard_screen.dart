@@ -8,10 +8,6 @@ import '../widgets/states.dart';
 import 'pass_detail_screen.dart';
 import 'satellites_screen.dart' show describeError;
 
-/// What matters to the signed-in user right now.
-///
-/// Deliberately small: upcoming passes, anything waiting on approval, and
-/// recent results. Not a wall of telemetry (client-spec section 7).
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -44,9 +40,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _future = () async {
         final passes = await api.passes();
         final catalogue = await api.satellites();
-        // An Admin also needs to know whether the station can execute
-        // anything at all, and what is waiting on them
-        // (client-spec section 7).
         List<WorkerStatus> workers = const [];
         List<Pass> queue = const [];
         if (isAdmin) {
@@ -219,8 +212,6 @@ class _Section extends StatelessWidget {
   }
 }
 
-/// What an Admin needs at a glance: can the station execute, and is anything
-/// waiting on a decision. Not a telemetry wall (client-spec section 7).
 class _OperationalSummary extends StatelessWidget {
   const _OperationalSummary({required this.workers, required this.waiting});
 

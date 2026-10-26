@@ -25,8 +25,6 @@ import (
 	"aagasa/internal/testsupport"
 )
 
-// stubPredictor lets a test script the passes the scheduler will see, so the
-// API tests need neither the prediction service nor a network.
 type stubPredictor struct {
 	mu     sync.Mutex
 	passes []prediction.Pass
@@ -50,10 +48,6 @@ func (s *stubPredictor) PredictPasses(ctx context.Context, request prediction.Re
 	return prediction.Result{NoradID: 25544, Passes: inWindow}, nil
 }
 
-// These tests exercise the real HTTP surface against real PostgreSQL and
-// Redis. They skip unless both are configured.
-//
-//	AAGASA_TEST_POSTGRES_URL=... AAGASA_TEST_REDIS_URL=... go test ./internal/httpapi/...
 
 const strongPassword = "a-sufficiently-long-password"
 
@@ -90,9 +84,6 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 
 	predictor := &stubPredictor{}
-	// A real plan generator, so approving a pass over the API exercises the
-	// same path production does. With nil here, a station that cannot produce
-	// a plan looked fine in every test.
 	planGenerator := passplan.NewGenerator(repo, predictor)
 	schedulingService := scheduling.NewService(repo, predictor, planGenerator, logger)
 
@@ -111,7 +102,6 @@ func newTestEnv(t *testing.T) *testEnv {
 	return &testEnv{server: server, repo: repo, predictor: predictor}
 }
 
-// do issues a request, optionally authenticated, and decodes the JSON body.
 func (e *testEnv) do(t *testing.T, method, path, token string, body any) (int, map[string]any) {
 	t.Helper()
 
@@ -159,7 +149,6 @@ func (e *testEnv) login(t *testing.T, username, password string) (int, string, b
 	return code, token, mustChange
 }
 
-// rootReady completes the forced password change and returns a usable token.
 func (e *testEnv) rootReady(t *testing.T) string {
 	t.Helper()
 	_, token, _ := e.login(t, auth.BootstrapUsername, auth.BootstrapPassword)
@@ -172,7 +161,6 @@ func (e *testEnv) rootReady(t *testing.T) string {
 	return token
 }
 
-// createUser makes an account and returns its id and a ready-to-use token.
 func (e *testEnv) createUser(t *testing.T, rootToken, username, role string) (string, string) {
 	t.Helper()
 	code, body := e.do(t, http.MethodPost, "/api/users", rootToken, map[string]any{
@@ -183,7 +171,6 @@ func (e *testEnv) createUser(t *testing.T, rootToken, username, role string) (st
 	}
 	id, _ := body["id"].(string)
 
-	// New accounts must change their password before they can do anything.
 	_, token, _ := e.login(t, username, strongPassword)
 	newPassword := strongPassword + "-" + username
 	if code, _ := e.do(t, http.MethodPost, "/api/auth/change-password", token, map[string]any{
@@ -195,7 +182,6 @@ func (e *testEnv) createUser(t *testing.T, rootToken, username, role string) (st
 	return id, token
 }
 
-// spec.md section 17.1: the first start creates root/toor and demands a change.
 func TestFirstStartCreatesRootRequiringPasswordChange(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -217,13 +203,11 @@ func TestFirstStartCreatesRootRequiringPasswordChange(t *testing.T) {
 	if root.Role != domain.RoleRoot {
 		t.Errorf("role = %q, want root", root.Role)
 	}
-	// Global test property 20.
 	if err := auth.VerifyPassword(auth.BootstrapPassword, root.PasswordHash); err != nil {
 		t.Errorf("stored hash does not verify: %v", err)
 	}
 }
 
-// Until the password changes, everything except the change itself is refused.
 func TestPasswordChangeIsRequiredBeforeAnythingElse(t *testing.T) {
 	env := newTestEnv(t)
 	_, token, _ := env.login(t, auth.BootstrapUsername, auth.BootstrapPassword)
@@ -247,13 +231,11 @@ func TestPasswordChangeIsRequiredBeforeAnythingElse(t *testing.T) {
 		}
 	}
 
-	// /me is allowed so the client can discover why it is blocked.
 	if code, _ := env.do(t, http.MethodGet, "/api/auth/me", token, nil); code != http.StatusOK {
 		t.Errorf("GET /api/auth/me = %d, want 200", code)
 	}
 }
 
-// spec.md section 17.1: the bootstrap credential stops working after the change.
 func TestBootstrapCredentialStopsWorking(t *testing.T) {
 	env := newTestEnv(t)
 	env.rootReady(t)
@@ -266,7 +248,6 @@ func TestBootstrapCredentialStopsWorking(t *testing.T) {
 	}
 }
 
-// Root must not be able to keep the well-known bootstrap password.
 func TestBootstrapPasswordCannotBeReused(t *testing.T) {
 	env := newTestEnv(t)
 	_, token, _ := env.login(t, auth.BootstrapUsername, auth.BootstrapPassword)
@@ -326,7 +307,6 @@ func TestLogoutRevokesTheSession(t *testing.T) {
 	}
 }
 
-// Changing the password must not leave the old session usable.
 func TestPasswordChangeRevokesTheSession(t *testing.T) {
 	env := newTestEnv(t)
 	_, token, _ := env.login(t, auth.BootstrapUsername, auth.BootstrapPassword)
@@ -341,7 +321,6 @@ func TestPasswordChangeRevokesTheSession(t *testing.T) {
 	}
 }
 
-// Exit criterion: a normal user cannot perform an admin operation.
 func TestNormalUserCannotPerformAdminOperations(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -362,14 +341,12 @@ func TestNormalUserCannotPerformAdminOperations(t *testing.T) {
 	}
 }
 
-// Exit criterion: an admin cannot perform a Root-only operation.
 func TestAdminCannotPerformRootOnlyOperations(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
 	_, adminToken := env.createUser(t, rootToken, "admin1", "admin")
 	targetID, _ := env.createUser(t, rootToken, "target", "user")
 
-	// Root-only: promotion, deletion, first-run setup.
 	if code, _ := env.do(t, http.MethodPatch, "/api/users/"+targetID, adminToken,
 		map[string]any{"role": "admin"}); code != http.StatusForbidden {
 		t.Errorf("admin promoting a user = %d, want 403", code)
@@ -381,7 +358,6 @@ func TestAdminCannotPerformRootOnlyOperations(t *testing.T) {
 		validSetupBody()); code != http.StatusForbidden {
 		t.Errorf("admin running setup = %d, want 403", code)
 	}
-	// An admin may still create normal users and list accounts.
 	if code, _ := env.do(t, http.MethodGet, "/api/users", adminToken, nil); code != http.StatusOK {
 		t.Errorf("admin listing users = %d, want 200", code)
 	}
@@ -390,7 +366,6 @@ func TestAdminCannotPerformRootOnlyOperations(t *testing.T) {
 	}); code != http.StatusCreated {
 		t.Errorf("admin creating a normal user = %d, want 201", code)
 	}
-	// But not another admin.
 	if code, _ := env.do(t, http.MethodPost, "/api/users", adminToken, map[string]any{
 		"username": "admin2", "password": strongPassword, "role": "admin",
 	}); code != http.StatusForbidden {
@@ -398,7 +373,6 @@ func TestAdminCannotPerformRootOnlyOperations(t *testing.T) {
 	}
 }
 
-// Exit criteria: Root cannot be deleted and cannot be demoted.
 func TestRootCannotBeDeletedOrDemoted(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -419,7 +393,6 @@ func TestRootCannotBeDeletedOrDemoted(t *testing.T) {
 		}
 	}
 
-	// Root is still Root and still able to sign in.
 	after, err := env.repo.GetUserByUsername(context.Background(), auth.BootstrapUsername)
 	if err != nil {
 		t.Fatalf("reload root: %v", err)
@@ -429,7 +402,6 @@ func TestRootCannotBeDeletedOrDemoted(t *testing.T) {
 	}
 }
 
-// The database refuses even if the API layer is bypassed entirely.
 func TestDatabaseRefusesRootDeletionDirectly(t *testing.T) {
 	env := newTestEnv(t)
 	env.rootReady(t)
@@ -486,7 +458,6 @@ func TestNobodyCanCreateASecondRoot(t *testing.T) {
 	}
 }
 
-// A response must never carry a password hash.
 func TestUserResponsesNeverIncludeThePasswordHash(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -511,7 +482,6 @@ func TestUserResponsesNeverIncludeThePasswordHash(t *testing.T) {
 	}
 }
 
-// A failed login must not reveal whether the account exists.
 func TestLoginDoesNotDiscloseAccountExistence(t *testing.T) {
 	env := newTestEnv(t)
 	env.rootReady(t)
@@ -557,7 +527,6 @@ func validSetupBody() map[string]any {
 	}
 }
 
-// spec.md section 23: first-run setup persists the station configuration.
 func TestFirstRunSetupPersistsStationConfiguration(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -623,14 +592,13 @@ func TestSetupRunsOnlyOnce(t *testing.T) {
 	}
 }
 
-// A rejected setup must not leave a partially configured station behind.
 func TestInvalidSetupLeavesNothingBehind(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
 	ctx := context.Background()
 
 	bad := validSetupBody()
-	bad["rotator_park_elevation_degrees"] = 120 // outside the G-550 range
+	bad["rotator_park_elevation_degrees"] = 120
 
 	if code, _ := env.do(t, http.MethodPost, "/api/setup", rootToken, bad); code != http.StatusBadRequest {
 		t.Fatalf("invalid setup = %d, want 400", code)
@@ -649,7 +617,6 @@ func TestInvalidSetupLeavesNothingBehind(t *testing.T) {
 	}
 }
 
-// spec.md section 22: privileged actions leave an audit trail.
 func TestPrivilegedActionsAreAudited(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -665,7 +632,6 @@ func TestPrivilegedActionsAreAudited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count audit: %v", err)
 	}
-	// Creation plus the role change.
 	if count < 2 {
 		t.Errorf("audit records = %d, want at least 2", count)
 	}
@@ -692,9 +658,6 @@ func TestMalformedRequestBodiesAreRejected(t *testing.T) {
 	}
 }
 
-// An account that requested passes cannot be deleted: the database refuses it
-// so the history outlives the account (spec.md section 13). The API has to
-// say that rather than reporting a fault.
 func TestDeletingAUserWithPassesIsRefusedClearly(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -716,7 +679,6 @@ func TestDeletingAUserWithPassesIsRefusedClearly(t *testing.T) {
 		t.Errorf("error = %v, want in_use", body["error"])
 	}
 
-	// The account is still there and still usable, not half-deleted.
 	_, list := env.do(t, http.MethodGet, "/api/users", rootToken, nil)
 	found := false
 	for _, entry := range list["users"].([]any) {
@@ -729,8 +691,6 @@ func TestDeletingAUserWithPassesIsRefusedClearly(t *testing.T) {
 	}
 }
 
-// An account with no history deletes normally, so the refusal above is about
-// the references and not about deletion being broken.
 func TestDeletingAUserWithoutPassesWorks(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -741,15 +701,11 @@ func TestDeletingAUserWithoutPassesWorks(t *testing.T) {
 	}
 }
 
-// Deleting an account must not be blocked by its own audit trail. Every login
-// is audited, so if the trail's append-only rule fought the account's foreign
-// key, no account that had ever signed in could be removed.
 func TestAuditTrailDoesNotBlockAccountDeletion(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
 	userID, userToken := env.createUser(t, rootToken, "auditedaccount", "user")
 
-	// Signing in and reading are audited, so the account now has history.
 	if code, _ := env.do(t, http.MethodGet, "/api/auth/me", userToken, nil); code != http.StatusOK {
 		t.Fatal("the new account cannot read its own profile")
 	}
@@ -758,8 +714,6 @@ func TestAuditTrailDoesNotBlockAccountDeletion(t *testing.T) {
 		t.Fatalf("delete = %d %v, want 204", code, body)
 	}
 
-	// The trail keeps the actor identifier: an audit record that forgets who
-	// acted is worth less than one naming an account that no longer exists.
 	_, trail := env.do(t, http.MethodGet, "/api/audit?action=auth.login", rootToken, nil)
 	kept := false
 	for _, entry := range trail["records"].([]any) {

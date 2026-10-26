@@ -7,11 +7,6 @@ import '../state/session.dart';
 import '../widgets/states.dart';
 import 'app_shell.dart';
 
-/// Sends Root to first-run setup, and everyone else to the app.
-///
-/// Before setup the Server has no station, so predictions and scheduling are
-/// refused. Rather than letting a user meet that as a wall of errors, the app
-/// says who has to act (spec.md section 17.1).
 class FirstRunGate extends StatefulWidget {
   const FirstRunGate({super.key});
 
@@ -45,8 +40,6 @@ class _FirstRunGateState extends State<FirstRunGate> {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(body: LoadingState());
         }
-        // If the check itself fails, carry on into the app rather than
-        // blocking on a question that is not the user's to answer.
         if (snapshot.hasError || (snapshot.data?.initialized ?? true)) {
           return const AppShell();
         }

@@ -55,7 +55,6 @@ class RecordingUploader:
         for recording in self._store.pending_uploads(limit=limit):
             path = Path(recording.absolute_path)
             if not path.is_file():
-                # The file went while the metadata stayed; nothing to send.
                 logger.warning("queued recording %s is missing from disk",
                                recording.recording_id)
                 self._store.mark_deleted(recording.recording_id)
@@ -64,8 +63,6 @@ class RecordingUploader:
             try:
                 response = self._client.upload_recording(recording, path)
             except grpc.RpcError as error:
-                # An unreachable Server is not a recording problem. Note it and
-                # let the caller decide when to try again.
                 self._store.mark_upload_failed(recording.recording_id, error.code().name)
                 raise
             except OSError as error:
@@ -73,7 +70,6 @@ class RecordingUploader:
                 summary["failed"] += 1
                 continue
 
-            # Both outcomes mean the Server holds it, so stop retrying.
             self._store.mark_uploaded(recording.recording_id)
             if response.stored:
                 summary["uploaded"] += 1
@@ -91,7 +87,6 @@ class RecordingUploader:
             return 0
 
         response = self._client.report_executions(entries)
-        # Only mark them synced once the Server has accepted them.
         self._store.mark_history_synced([entry.id for entry in entries])
         logger.info("reported %d execution record(s), accepted=%d",
                     len(entries), response.accepted)
@@ -121,7 +116,6 @@ class RecordingUploader:
         summary = {"usage": round(usage, 4), "under_pressure": under_pressure, "deleted": 0}
 
         for candidate in order:
-            # Deletion is destructive, so confirm the path really is ours.
             if not ensure_within(self._recordings, candidate.absolute_path):
                 logger.error("refusing to delete %s: outside the recordings root",
                              candidate.absolute_path)
@@ -132,7 +126,6 @@ class RecordingUploader:
             summary["deleted"] += 1
 
             if under_pressure and disk_usage_ratio(self._recordings) < DISK_PRESSURE_THRESHOLD:
-                # Enough room recovered; stop rather than clearing everything.
                 break
 
         if summary["deleted"]:

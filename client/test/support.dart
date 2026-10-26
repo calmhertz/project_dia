@@ -6,7 +6,6 @@ import 'package:aagasa_client/state/token_store.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-/// Routes requests by path so a test states only what it cares about.
 class FakeServer {
   FakeServer({this.token = 'test-token'});
 
@@ -16,25 +15,17 @@ class FakeServer {
   final Map<String, (int, Map<String, dynamic>)> failures = {};
   final List<String> requested = [];
 
-  /// Requests that arrived, so a test can assert what the UI actually asked
-  /// the Server for.
   List<String> get seen => requested;
 
   http.Client client() => MockClient((request) async {
-    // Routes are keyed without the leading slash so a test reads the way the
-    // API does.
     final path =
         request.url.path.replaceFirst(RegExp(r'^/'), '') +
         (request.url.hasQuery ? '?${request.url.query}' : '');
     requested.add('${request.method} $path');
-    // A key may name a method ("POST api/setup") when a test needs one verb
-    // to behave differently from another on the same path.
     bool matches(String key) => key.contains(' ')
         ? '${request.method} $path'.startsWith(key)
         : path.startsWith(key);
 
-    // Longest key first, so a route with a query string wins over the bare
-    // path it starts with.
     int byLength(String a, String b) => b.length.compareTo(a.length);
 
     for (final entry
@@ -138,8 +129,6 @@ Map<String, dynamic> passJson({
   'recording_mode': 'raw',
   'recording_pre_roll_seconds': 10,
   'recording_post_roll_seconds': 10,
-  // Omitted entirely when null, which is how the Server withholds a pass
-  // owner from unrelated users.
   'requested_by': ?requestedBy,
   'created_at': '2026-08-25T10:00:00Z',
 };

@@ -8,11 +8,6 @@ import '../../widgets/states.dart';
 import '../pass_detail_screen.dart';
 import '../satellites_screen.dart' show describeError;
 
-/// Everything waiting on a decision (client-spec section 17).
-///
-/// The queue shows what a decision needs: who asked, for what, when, on which
-/// band, produced how, and whether it will be public. Every decision is the
-/// Server's; this screen only reports what came back.
 class ApprovalsScreen extends StatefulWidget {
   const ApprovalsScreen({super.key});
 
@@ -47,16 +42,12 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
           status: 'pending_approval',
         );
         final catalogue = await api.satellites();
-        // The queue names the requester where the Server disclosed one; a
-        // missing id stays missing rather than being invented.
         Map<String, String> usernames = {};
         try {
           usernames = {
             for (final user in await api.users()) user.id: user.username,
           };
         } on Object {
-          // Not every Admin deployment needs the user list to approve; the
-          // queue still works with identifiers withheld.
           usernames = {};
         }
         return (
@@ -164,8 +155,6 @@ class _RequestCard extends StatelessWidget {
   final Pass pass;
   final Satellite? satellite;
 
-  /// The requester's name where the Server disclosed the id and the name is
-  /// known. Null means "not shown", not "anonymous".
   final String? requester;
   final bool busy;
   final VoidCallback onApprove;

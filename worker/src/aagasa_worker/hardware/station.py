@@ -67,8 +67,6 @@ class Station:
         self._rotator = rotator
         self._sdr = sdr
         self._satdump = satdump
-        # One RTL-SDR means one capture; the lock makes that a hard rule
-        # rather than a convention (worker-spec section 12).
         self._capture_lock = threading.Lock()
         self._capture: CaptureHandle | None = None
 
@@ -171,8 +169,6 @@ class Station:
             if self.capture_active:
                 raise SDRError("a capture is already running; the station has one RTL-SDR")
 
-            # A finished capture that was never collected would otherwise leak
-            # a zombie process.
             if self._capture is not None:
                 self._reap_locked()
 

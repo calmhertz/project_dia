@@ -144,7 +144,6 @@ func recordingIDFor(passID, relativePath string) string {
 	return hex.EncodeToString(digest.Sum(nil))
 }
 
-// upload sends one recording, optionally corrupting what it claims.
 func (e *uploadEnv) upload(t *testing.T, relativePath string, content []byte,
 	mutate func(*workerv1.RecordingMetadata)) (*workerv1.UploadRecordingResponse, error) {
 	t.Helper()
@@ -216,7 +215,6 @@ func TestUploadStoresTheRecording(t *testing.T) {
 	}
 }
 
-// The V11 exit criterion: retries create no logical duplicate.
 func TestRepeatedUploadCreatesNoDuplicate(t *testing.T) {
 	env := newUploadEnv(t)
 	content := []byte("the same recording, sent three times")
@@ -229,13 +227,11 @@ func TestRepeatedUploadCreatesNoDuplicate(t *testing.T) {
 		t.Error("the first upload did not store")
 	}
 
-	// A lost acknowledgement makes the Worker send it again.
 	for attempt := 0; attempt < 2; attempt++ {
 		retry, err := env.upload(t, "baseband.ziq", content, nil)
 		if err != nil {
 			t.Fatalf("retry %d: %v", attempt, err)
 		}
-		// Succeeds, and reports that nothing new was stored.
 		if retry.GetStored() {
 			t.Errorf("retry %d stored a second copy", attempt)
 		}
@@ -272,7 +268,6 @@ func TestSeveralOutputsFromOnePassAreDistinct(t *testing.T) {
 	}
 }
 
-// A corrupted transfer must not be stored.
 func TestChecksumMismatchIsRejected(t *testing.T) {
 	env := newUploadEnv(t)
 
@@ -303,7 +298,6 @@ func TestSizeMismatchIsRejected(t *testing.T) {
 	}
 }
 
-// A rejected upload must not leave a partial file where a good one belongs.
 func TestARejectedUploadLeavesNoFileBehind(t *testing.T) {
 	env := newUploadEnv(t)
 
@@ -344,7 +338,6 @@ func TestMalformedMetadataIsRejected(t *testing.T) {
 	}
 }
 
-// A crafted path must not escape the recordings root.
 func TestPathTraversalIsRejected(t *testing.T) {
 	env := newUploadEnv(t)
 
@@ -356,7 +349,6 @@ func TestPathTraversalIsRejected(t *testing.T) {
 	}
 }
 
-// Outcome reporting -------------------------------------------------------
 
 func TestReportExecutionsRecordsTheOutcome(t *testing.T) {
 	env := newUploadEnv(t)
@@ -384,7 +376,6 @@ func TestReportExecutionsRecordsTheOutcome(t *testing.T) {
 	}
 }
 
-// Re-reporting after a lost acknowledgement must not rewrite history.
 func TestReportingTheSameOutcomeTwiceIsSafe(t *testing.T) {
 	env := newUploadEnv(t)
 	ctx := context.Background()
@@ -396,7 +387,6 @@ func TestReportingTheSameOutcomeTwiceIsSafe(t *testing.T) {
 		if err != nil {
 			t.Fatalf("attempt %d: %v", attempt, err)
 		}
-		// Accepted every time, so the Worker stops resending.
 		if response.GetAccepted() != 1 {
 			t.Errorf("attempt %d accepted = %d", attempt, response.GetAccepted())
 		}
@@ -411,7 +401,6 @@ func TestReportingTheSameOutcomeTwiceIsSafe(t *testing.T) {
 	}
 }
 
-// A later contradictory report must not resurrect a terminal pass.
 func TestATerminalPassIsNotRewritten(t *testing.T) {
 	env := newUploadEnv(t)
 	ctx := context.Background()

@@ -7,14 +7,10 @@ import (
 	"time"
 )
 
-// Captured from CelesTrak on 2026-08-24. Real data, including the CRLF line
-// endings and the space-padded title that the live endpoint returns.
 const celestrakISS = "ISS (ZARYA)             \r\n" +
 	"1 25544U 98067A   26236.17729445  .00008773  00000+0  16369-3 0  9990\r\n" +
 	"2 25544  51.6333 323.5788 0007697  77.8713 282.3138 15.49600847582298\r\n"
 
-// Captured from SatNOGS on the same day. Note the "0 " title prefix and the
-// slightly different B* formatting, which changes the checksum digit.
 const satnogsISS = "0 ISS (ZARYA)\n" +
 	"1 25544U 98067A   26236.17729445  .00008773  00000-0  16369-3 0  9991\n" +
 	"2 25544  51.6333 323.5788 0007697  77.8713 282.3138 15.49600847582298\n"
@@ -32,7 +28,6 @@ func TestParseRealCelestrakResponse(t *testing.T) {
 	if set.NoradID != 25544 {
 		t.Errorf("NoradID = %d, want 25544", set.NoradID)
 	}
-	// The padded title must be trimmed, and CRLF must not survive into storage.
 	if set.Name != "ISS (ZARYA)" {
 		t.Errorf("Name = %q, want %q", set.Name, "ISS (ZARYA)")
 	}
@@ -52,14 +47,11 @@ func TestParseRealSatNOGSResponse(t *testing.T) {
 	if set.NoradID != 25544 {
 		t.Errorf("NoradID = %d, want 25544", set.NoradID)
 	}
-	// The 3LE "0 " prefix is a format marker, not part of the name.
 	if set.Name != "ISS (ZARYA)" {
 		t.Errorf("Name = %q, want %q", set.Name, "ISS (ZARYA)")
 	}
 }
 
-// Both providers describe the same orbit at the same epoch even though the
-// exact text differs, so the epoch must agree.
 func TestBothProvidersAgreeOnEpoch(t *testing.T) {
 	fromCelestrak, err := Parse(celestrakISS)
 	if err != nil {
@@ -73,7 +65,6 @@ func TestBothProvidersAgreeOnEpoch(t *testing.T) {
 	if !fromCelestrak.Epoch.Equal(fromSatNOGS.Epoch) {
 		t.Errorf("epochs differ: %s vs %s", fromCelestrak.Epoch, fromSatNOGS.Epoch)
 	}
-	// The text differs, so they are genuinely distinct stored versions.
 	if fromCelestrak.SameElements(fromSatNOGS) {
 		t.Error("expected the two providers' text to differ")
 	}
@@ -85,7 +76,6 @@ func TestEpochDecoding(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 
-	// 26236.17729445 is day 236 of 2026, plus 0.17729445 of a day.
 	want := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC).
 		Add(time.Duration(235.17729445 * float64(24*time.Hour)))
 
@@ -97,7 +87,6 @@ func TestEpochDecoding(t *testing.T) {
 	}
 }
 
-// The two-digit year rolls over at 57 per the TLE convention.
 func TestEpochYearRollover(t *testing.T) {
 	cases := map[string]int{"57001.00000000": 1957, "99001.00000000": 1999, "00001.00000000": 2000, "56001.00000000": 2056}
 
@@ -115,14 +104,12 @@ func TestEpochYearRollover(t *testing.T) {
 	}
 }
 
-// The modulo-10 checksum is the only integrity check a TLE carries.
 func TestChecksumRejectsCorruptedLines(t *testing.T) {
 	set, err := Parse(celestrakISS)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 
-	// Flip a digit in the middle of line 1; the checksum must catch it.
 	corrupted := []byte(set.Line1)
 	if corrupted[20] == '9' {
 		corrupted[20] = '8'
@@ -136,14 +123,12 @@ func TestChecksumRejectsCorruptedLines(t *testing.T) {
 }
 
 func TestChecksumCountsMinusSignsAsOne(t *testing.T) {
-	// "16369-3" contributes its digits plus 1 for the minus.
 	if got := Checksum("-"); got != 1 {
 		t.Errorf("Checksum(\"-\") = %d, want 1", got)
 	}
 	if got := Checksum("11-"); got != 3 {
 		t.Errorf("Checksum(\"11-\") = %d, want 3", got)
 	}
-	// Letters and spaces contribute nothing.
 	if got := Checksum("AB C"); got != 0 {
 		t.Errorf("Checksum(\"AB C\") = %d, want 0", got)
 	}
@@ -181,7 +166,6 @@ func TestMalformedInputIsRejected(t *testing.T) {
 	}
 }
 
-// Two lines from different satellites must never be accepted as one set.
 func TestMismatchedCatalogNumbersAreRejected(t *testing.T) {
 	iss, _ := Parse(celestrakISS)
 	noaa, _ := Parse(celestrakNOAA19)

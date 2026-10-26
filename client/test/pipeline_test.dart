@@ -4,8 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'support.dart';
 
-/// SatDump pipeline selection and upload (spec.md section 19.1,
-/// client-spec sections 11 and 12).
 
 FakeServer stationWithPipelines(
   String role, {
@@ -59,13 +57,11 @@ Future<void> openRequestForm(WidgetTester tester, FakeServer server) async {
 }
 
 void main() {
-  // Choosing a pipeline -----------------------------------------------------
 
   testWidgets('a raw recording asks for no pipeline', (tester) async {
     await openRequestForm(tester, stationWithPipelines('user'));
 
     expect(find.text('Pipeline'), findsNothing);
-    // Raw is the default, so the request can be submitted straight away.
     final button = tester.widget<FilledButton>(
       find.widgetWithText(FilledButton, 'Request pass'),
     );
@@ -79,7 +75,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Pipeline'), findsOneWidget);
-    // Nothing chosen yet, so the request cannot be submitted.
     final button = tester.widget<FilledButton>(
       find.widgetWithText(FilledButton, 'Request pass'),
     );
@@ -122,12 +117,9 @@ void main() {
       server.seen.any((entry) => entry.startsWith('POST api/passes')),
       isTrue,
     );
-    // Back on the satellite page: the request was accepted.
     expect(find.text('Request this pass'), findsNothing);
   });
 
-  // A station that has never connected has reported nothing, which is not the
-  // same as a station with no pipelines.
   testWidgets('an unreported installation is explained', (tester) async {
     final server = stationWithPipelines('user', pipelines: []);
     server.responses['api/pipelines'] = {
@@ -149,7 +141,6 @@ void main() {
     expect(button.onPressed, isNull);
   });
 
-  // Uploading ---------------------------------------------------------------
 
   testWidgets('a normal user is not offered the pipelines tab', (tester) async {
     final server = stationWithPipelines('user');
@@ -194,8 +185,6 @@ void main() {
     await tester.tap(find.text('Pipelines'));
     await tester.pumpAndSettle();
 
-    // Standard and uploaded are told apart: the heading, and the one custom
-    // entry's own subtitle.
     expect(find.text('From the station'), findsOneWidget);
     expect(find.text('Uploaded'), findsNWidgets(2));
     expect(find.text('Standard'), findsNWidgets(2));
@@ -216,8 +205,6 @@ void main() {
     );
   });
 
-  // Malformed JSON is caught before a pointless round trip; the message says
-  // what is wrong rather than waiting for the Server to say it.
   testWidgets('obvious nonsense is caught before sending', (tester) async {
     final server = stationWithPipelines('admin');
     server.responses['api/station'] = {
@@ -253,15 +240,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('That is not valid JSON'), findsOneWidget);
-    // Nothing was sent: the client knew this could not succeed.
     expect(
       server.seen.any((entry) => entry.startsWith('POST api/pipelines')),
       isFalse,
     );
   });
 
-  // Structure the client cannot judge is the Server's call, and its refusal
-  // is shown as it stands.
   testWidgets('a refused definition shows the server reason', (tester) async {
     final server = stationWithPipelines('admin');
     server.responses['api/station'] = {
@@ -299,7 +283,6 @@ void main() {
       find.widgetWithText(TextField, 'Name'),
       'Wrong shape',
     );
-    // Valid JSON, but not a pipeline file: only the Server can say so.
     await tester.enterText(
       find.widgetWithText(TextField, 'Pipeline JSON'),
       '["noaa_apt"]',
@@ -310,8 +293,6 @@ void main() {
     expect(find.text('the definition names no pipeline'), findsOneWidget);
   });
 
-  // client-spec section 12: uploading a custom JSON is offered wherever a
-  // pipeline is chosen, not hidden in administration.
   testWidgets('the request form offers a custom upload', (tester) async {
     await openRequestForm(tester, stationWithPipelines('user'));
 
@@ -340,7 +321,6 @@ void main() {
   recordingsTests();
 }
 
-// The recordings destination (client-spec sections 5 and 20).
 
 void recordingsTests() {
   FakeServer stationWithRecordings(String role) {
@@ -407,8 +387,6 @@ void recordingsTests() {
     expect(find.textContaining('public passes'), findsOneWidget);
   });
 
-  // Only Admin and Root may ask for everything; the Server refuses anyone
-  // else, and the client does not offer it.
   testWidgets('a normal user is not offered every recording', (tester) async {
     await openRecordings(tester, stationWithRecordings('user'));
 

@@ -7,11 +7,6 @@ import '../../widgets/states.dart';
 import '../../widgets/pipeline_upload.dart';
 import '../satellites_screen.dart' show describeError;
 
-/// SatDump pipelines: what the station provides, and what has been uploaded.
-///
-/// There is no pipeline editor here, deliberately (spec.md section 19.1). A
-/// custom pipeline is JSON written elsewhere and pasted in; the Server
-/// decides whether it is acceptable.
 class PipelinesScreen extends StatefulWidget {
   const PipelinesScreen({super.key});
 

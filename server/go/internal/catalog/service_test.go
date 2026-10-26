@@ -16,7 +16,6 @@ import (
 	"aagasa/internal/tle"
 )
 
-// Real element sets captured from the live providers on 2026-08-24.
 const (
 	celestrakISS = "ISS (ZARYA)             \r\n" +
 		"1 25544U 98067A   26236.17729445  .00008773  00000+0  16369-3 0  9990\r\n" +
@@ -26,7 +25,6 @@ const (
 		"1 25544U 98067A   26236.17729445  .00008773  00000-0  16369-3 0  9991\n" +
 		"2 25544  51.6333 323.5788 0007697  77.8713 282.3138 15.49600847582298\n"
 
-	// A later epoch for the same object, to represent a refresh.
 	celestrakISSNewer = "ISS (ZARYA)             \r\n" +
 		"1 25544U 98067A   26237.17729445  .00008773  00000+0  16369-3 0  9991\r\n" +
 		"2 25544  51.6333 323.5788 0007697  77.8713 282.3138 15.49600847582298\r\n"
@@ -51,7 +49,6 @@ func newRepo(t *testing.T) *store.Repository {
 	return store.NewRepository(pool)
 }
 
-// fakeProvider serves a scripted response and counts calls.
 type fakeProvider struct {
 	name  tle.Source
 	text  string
@@ -112,7 +109,6 @@ func TestAddSatelliteStoresRecordAndOrbitalData(t *testing.T) {
 	}
 }
 
-// spec.md section 11.2: missing metadata must not block tracking.
 func TestSatelliteIsUsableWithoutMetadata(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo(t)
@@ -125,7 +121,6 @@ func TestSatelliteIsUsableWithoutMetadata(t *testing.T) {
 		t.Fatalf("AddSatellite: %v", err)
 	}
 
-	// The name falls back to the TLE title, and orbital data is present.
 	if satellite.Name != "ISS (ZARYA)" {
 		t.Errorf("Name = %q, want the TLE title", satellite.Name)
 	}
@@ -134,7 +129,6 @@ func TestSatelliteIsUsableWithoutMetadata(t *testing.T) {
 	}
 }
 
-// Without orbital data a satellite cannot be tracked, so adding must fail.
 func TestAddSatelliteFailsWhenNoProviderHasData(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo(t)
@@ -147,7 +141,6 @@ func TestAddSatelliteFailsWhenNoProviderHasData(t *testing.T) {
 		t.Fatalf("error = %v, want ErrNoOrbitalData", err)
 	}
 
-	// Nothing partial was left behind.
 	if satellites, err := repo.ListSatellites(ctx); err != nil || len(satellites) != 0 {
 		t.Errorf("satellites = %d, %v; want none", len(satellites), err)
 	}
@@ -166,7 +159,6 @@ func TestAddingTheSameCatalogNumberTwiceIsRejected(t *testing.T) {
 	}
 }
 
-// spec.md section 11.3: the fallback answers when the primary is down.
 func TestRefreshFallsBackToTheSecondProvider(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo(t)
@@ -188,7 +180,6 @@ func TestRefreshFallsBackToTheSecondProvider(t *testing.T) {
 	}
 }
 
-// The critical rule: a provider outage must never discard stored orbital data.
 func TestProviderOutagePreservesLastKnownGood(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo(t)
@@ -204,7 +195,6 @@ func TestProviderOutagePreservesLastKnownGood(t *testing.T) {
 		t.Fatalf("CurrentTLE: %v", err)
 	}
 
-	// Every provider now fails.
 	provider.err = errors.New("network unreachable")
 	outcome := service.Refresh(ctx, satellite)
 
@@ -218,7 +208,6 @@ func TestProviderOutagePreservesLastKnownGood(t *testing.T) {
 		t.Error("refresh claimed an update while every provider was down")
 	}
 
-	// The stored record is untouched and still readable.
 	after, err := service.CurrentTLE(ctx, satellite.ID)
 	if err != nil {
 		t.Fatalf("orbital data lost after a failed refresh: %v", err)
@@ -250,7 +239,6 @@ func TestRefreshStoresANewerEpochAsANewVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTLERecords: %v", err)
 	}
-	// Both versions are retained: history is not overwritten.
 	if len(records) != 2 {
 		t.Fatalf("records = %d, want 2", len(records))
 	}
@@ -259,7 +247,6 @@ func TestRefreshStoresANewerEpochAsANewVersion(t *testing.T) {
 	}
 }
 
-// Re-fetching unchanged elements must not create a duplicate version.
 func TestRefreshWithUnchangedElementsStoresNothingNew(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo(t)
@@ -284,7 +271,6 @@ func TestRefreshWithUnchangedElementsStoresNothingNew(t *testing.T) {
 	}
 }
 
-// One satellite's outage must not stop the rest of the sweep.
 func TestRefreshAllContinuesPastAFailure(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo(t)
@@ -314,7 +300,6 @@ func TestRefreshAllContinuesPastAFailure(t *testing.T) {
 	}
 }
 
-// Fresh data must not be re-fetched on every tick.
 func TestRefreshAllSkipsRecentlyFetchedSatellites(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo(t)
@@ -333,21 +318,17 @@ func TestRefreshAllSkipsRecentlyFetchedSatellites(t *testing.T) {
 		t.Error("a provider was contacted for data fetched moments ago")
 	}
 
-	// Forcing bypasses the age check.
 	if outcomes := service.RefreshAll(ctx, true); len(outcomes) != 1 {
 		t.Errorf("forced outcomes = %d, want 1", len(outcomes))
 	}
 }
 
 func TestRefreshIntervalMatchesTheSpecifiedPolicy(t *testing.T) {
-	// spec.md section 11.3 requires at least every 24 hours.
 	if catalog.RefreshInterval > 24*time.Hour {
 		t.Errorf("RefreshInterval = %v, must not exceed 24h", catalog.RefreshInterval)
 	}
 }
 
-// A provider that answers with corrupt data is as bad as one that is down:
-// the stored record must survive either way.
 func TestCorruptProviderResponsePreservesLastKnownGood(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo(t)
@@ -363,7 +344,6 @@ func TestCorruptProviderResponsePreservesLastKnownGood(t *testing.T) {
 		t.Fatalf("CurrentTLE: %v", err)
 	}
 
-	// Same lines, one digit flipped, so the checksum no longer matches.
 	provider.text = "ISS (ZARYA)\r\n" +
 		"1 25544U 98067A   26237.17729445  .00008773  00000+0  16369-3 0  9990\r\n" +
 		"2 25544  51.6333 323.5788 0007697  77.8713 282.3138 15.49600847582298\r\n"

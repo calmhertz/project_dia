@@ -1,8 +1,3 @@
-# Aagasa Worker pod. Install to /etc/containers/systemd/ with worker.kube.
-#
-# Device access is explicit: the rotator serial port and the RTL-SDR USB bus
-# must both be mapped, and the pod needs privileges to reach them.
-# This file supports environment variable substitution via envsubst.
 apiVersion: v1
 kind: Pod
 metadata:
@@ -16,7 +11,6 @@ spec:
       env:
         - name: AAGASA_LOG_LEVEL
           value: "${AAGASA_LOG_LEVEL}"
-        # The Server resolves the identifiers from this name.
         - name: AAGASA_WORKER_NAME
           value: "${AAGASA_WORKER_NAME}"
         - name: AAGASA_SERVER_GRPC_ADDRESS
@@ -53,7 +47,6 @@ spec:
               name: aagasa-worker-shared-secret
               key: value
       securityContext:
-        # Required to open the rotator serial port and the RTL-SDR.
         privileged: true
       volumeMounts:
         - name: state

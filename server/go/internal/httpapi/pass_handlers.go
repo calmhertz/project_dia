@@ -16,10 +16,6 @@ import (
 
 const passListLimit = 200
 
-// passView is a pass as shown to a caller allowed to see it.
-//
-// RequestedBy is omitted unless the caller is the owner, an Admin or Root, so
-// a public pass does not disclose who booked it (spec.md section 16).
 type passView struct {
 	ID          string `json:"id"`
 	SatelliteID string `json:"satellite_id"`
@@ -66,7 +62,6 @@ func toPassView(pass domain.Pass, actor domain.User) passView {
 	if pass.CancellationReason != nil {
 		view.CancellationReason = string(*pass.CancellationReason)
 	}
-	// Owner identity is privileged information.
 	if pass.RequestedBy == actor.ID || auth.AtLeast(actor, domain.RoleAdmin) {
 		view.RequestedBy = pass.RequestedBy.String()
 	}
@@ -81,7 +76,6 @@ type requestPassRequest struct {
 	Visibility    string         `json:"visibility"`
 	PipelineID    string         `json:"pipeline_id"`
 	RadioSettings map[string]any `json:"radio_settings"`
-	// Override asks for a Root override of any conflicting pass.
 	Override bool `json:"override"`
 }
 
@@ -145,7 +139,6 @@ func (s *Server) handleRequestPass(w http.ResponseWriter, r *http.Request) {
 	writeJSON(s.logger, w, http.StatusCreated, response)
 }
 
-// handleListPasses returns the caller's own passes by default.
 func (s *Server) handleListPasses(w http.ResponseWriter, r *http.Request) {
 	actor := currentUser(r)
 	filter := store.PassFilter{Limit: passListLimit}
@@ -156,7 +149,6 @@ func (s *Server) handleListPasses(w http.ResponseWriter, r *http.Request) {
 	case "public":
 		filter.OnlyPublic = true
 	case "all":
-		// Only Admin and Root may see everything.
 		if !auth.AtLeast(actor, domain.RoleAdmin) {
 			writeError(s.logger, w, http.StatusForbidden, "forbidden", "not permitted")
 			return
@@ -178,8 +170,6 @@ func (s *Server) handleListPasses(w http.ResponseWriter, r *http.Request) {
 
 	views := make([]passView, 0, len(passes))
 	for _, pass := range passes {
-		// Defence in depth: filter again on the way out, so a query mistake
-		// cannot disclose a private pass.
 		if !scheduling.CanViewPass(actor, pass) {
 			continue
 		}
@@ -201,8 +191,6 @@ func (s *Server) handleGetPass(w http.ResponseWriter, r *http.Request) {
 
 	actor := currentUser(r)
 	if !scheduling.CanViewPass(actor, pass) {
-		// Not "forbidden": revealing that the pass exists would itself leak
-		// information about another user's private booking.
 		writeError(s.logger, w, http.StatusNotFound, "not_found", "not found")
 		return
 	}
@@ -301,19 +289,14 @@ func (s *Server) handleUpdateSchedulingConfig(w http.ResponseWriter, r *http.Req
 
 	writeJSON(s.logger, w, http.StatusCreated, map[string]any{
 		"minimum_lead_time_seconds": int64(saved.MinimumLeadTime.Seconds()),
-		// The new values are not usable until this moment
-		// (spec.md section 13.6).
 		"effective_from": saved.EffectiveFrom,
 	})
 }
 
-// writeSchedulingError maps scheduler errors onto status codes.
 func (s *Server) writeSchedulingError(w http.ResponseWriter, err error) {
 	var conflict *scheduling.ConflictError
 	switch {
 	case errors.As(err, &conflict):
-		// Sanitized: the occupied window only, never the other user
-		// (spec.md section 15).
 		writeJSON(s.logger, w, http.StatusConflict, map[string]any{
 			"error":         "station_conflict",
 			"message":       "This time is already occupied.",
@@ -333,11 +316,8 @@ func (s *Server) writeSchedulingError(w http.ResponseWriter, err error) {
 		writeError(s.logger, w, http.StatusNotFound, "pass_not_found",
 			"no predicted pass matches that time")
 	case errors.Is(err, passplan.ErrStationNotConfigured):
-		// Actionable by Root, so it says what is missing rather than hiding
-		// behind an internal error.
 		writeError(s.logger, w, http.StatusConflict, "station_not_configured", err.Error())
 	case errors.Is(err, scheduling.ErrInvalidTransition):
-		// Someone else usually got there first.
 		writeError(s.logger, w, http.StatusConflict, "invalid_state", err.Error())
 	case errors.Is(err, scheduling.ErrForbidden):
 		writeError(s.logger, w, http.StatusForbidden, "forbidden", "not permitted")
@@ -348,10 +328,6 @@ func (s *Server) writeSchedulingError(w http.ResponseWriter, err error) {
 	}
 }
 
-// handleGetPassPlan returns the executable plan generated for a pass.
-//
-// Operational detail for Admin and Root: it exposes station and worker
-// identifiers and the full pointing timeline.
 func (s *Server) handleGetPassPlan(w http.ResponseWriter, r *http.Request) {
 	id, ok := s.pathUUID(w, r)
 	if !ok {

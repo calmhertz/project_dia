@@ -1,5 +1,3 @@
-/// Errors the Server can return, in the shapes the UI must distinguish
-/// (client-spec section 23).
 library;
 
 class ApiException implements Exception {
@@ -12,7 +10,6 @@ class ApiException implements Exception {
 
   final int statusCode;
 
-  /// The Server's error identifier, for example `station_conflict`.
   final String code;
   final String message;
   final Map<String, dynamic> details;
@@ -30,8 +27,6 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
-/// The Server could not be reached at all, which the UI shows differently from
-/// a Server that answered with an error (client-spec section 22).
 class NetworkException implements Exception {
   const NetworkException(this.message);
 

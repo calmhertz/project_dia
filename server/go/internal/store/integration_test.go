@@ -15,18 +15,9 @@ import (
 	"aagasa/internal/testsupport"
 )
 
-// These tests need real databases. They are skipped unless the environment
-// points at them, so the default "go test ./..." stays hermetic.
-//
-//	AAGASA_TEST_POSTGRES_URL=postgres://... \
-//	AAGASA_TEST_REDIS_URL=redis://...       \
-//	AAGASA_TEST_MONGO_URL=mongodb://...     go test ./internal/store/...
 
-// argon2idHash is a syntactically valid Argon2id hash; the schema rejects any
-// other format. Real hashing arrives in V3.
 const argon2idHash = "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHR2YWx1ZQ$aGFzaHZhbHVlaGFzaHZhbHVlaGFzaHZhbA"
 
-// newTestPool migrates a fresh schema and returns a pool.
 func newTestPool(t *testing.T) (*pgxpool.Pool, *store.Repository) {
 	t.Helper()
 	url := testsupport.NewDatabase(t)
@@ -44,7 +35,6 @@ func newTestPool(t *testing.T) (*pgxpool.Pool, *store.Repository) {
 	return pool, store.NewRepository(pool)
 }
 
-// fixture builds the records a pass depends on.
 type fixture struct {
 	user      domain.User
 	station   domain.Station
@@ -105,7 +95,6 @@ func newFixture(t *testing.T, ctx context.Context, repo *store.Repository, suffi
 	return fixture{user: user, station: station, config: config, satellite: satellite, tle: tle}
 }
 
-// passAt builds a pass reserving [start, start+duration) plus buffers.
 func (f fixture) passAt(start time.Time, duration time.Duration) domain.Pass {
 	buffer := 2 * time.Minute
 	return domain.Pass{
@@ -139,7 +128,6 @@ func TestCreateAndReadDomainRecords(t *testing.T) {
 		t.Fatalf("create pass: %v", err)
 	}
 
-	// Read every record back and confirm the round trip preserved values.
 	if got, err := repo.GetUserByUsername(ctx, "operator-read"); err != nil || got.ID != f.user.ID {
 		t.Errorf("GetUserByUsername = %v, %v", got.ID, err)
 	}
@@ -176,8 +164,6 @@ func TestCreateAndReadDomainRecords(t *testing.T) {
 	}
 }
 
-// spec.md section 13.3: any overlapping reservation on the same station is a
-// conflict, regardless of satellite, band or user.
 func TestOverlappingStationReservationIsRejected(t *testing.T) {
 	ctx := context.Background()
 	_, repo := newTestPool(t)
@@ -188,19 +174,16 @@ func TestOverlappingStationReservationIsRejected(t *testing.T) {
 		t.Fatalf("first pass: %v", err)
 	}
 
-	// Pass A 10:00-10:15, pass B 10:10-10:20 -> B must be rejected.
 	_, err := repo.CreatePass(ctx, f.passAt(start.Add(10*time.Minute), 10*time.Minute))
 	if !errors.Is(err, store.ErrStationOverlap) {
 		t.Fatalf("overlapping pass error = %v, want ErrStationOverlap", err)
 	}
 
-	// A non-overlapping window after the buffers must still be accepted.
 	if _, err := repo.CreatePass(ctx, f.passAt(start.Add(30*time.Minute), 10*time.Minute)); err != nil {
 		t.Errorf("non-overlapping pass rejected: %v", err)
 	}
 }
 
-// A terminal pass releases the station so the slot can be reused.
 func TestTerminalPassReleasesReservation(t *testing.T) {
 	ctx := context.Background()
 	_, repo := newTestPool(t)
@@ -227,7 +210,6 @@ func TestTerminalPassReleasesReservation(t *testing.T) {
 	}
 }
 
-// Concurrent requests must not race past the conflict rule.
 func TestConcurrentOverlappingRequestsProduceOneWinner(t *testing.T) {
 	ctx := context.Background()
 	_, repo := newTestPool(t)
@@ -264,7 +246,6 @@ func TestConcurrentOverlappingRequestsProduceOneWinner(t *testing.T) {
 	}
 }
 
-// spec.md section 21: no code path may persist a non-Argon2id password hash.
 func TestNonArgon2idPasswordHashIsRejected(t *testing.T) {
 	ctx := context.Background()
 	_, repo := newTestPool(t)
@@ -279,7 +260,6 @@ func TestNonArgon2idPasswordHashIsRejected(t *testing.T) {
 	}
 }
 
-// spec.md section 17.1: Root is singular.
 func TestSecondRootIsRejected(t *testing.T) {
 	ctx := context.Background()
 	_, repo := newTestPool(t)
@@ -298,7 +278,6 @@ func TestSecondRootIsRejected(t *testing.T) {
 	}
 }
 
-// spec.md section 22: audit history must not be rewritten.
 func TestAuditRecordsAreAppendOnly(t *testing.T) {
 	ctx := context.Background()
 	pool, repo := newTestPool(t)
@@ -328,7 +307,6 @@ func TestAuditRecordsAreAppendOnly(t *testing.T) {
 	}
 }
 
-// A rolled-back transaction must leave nothing behind.
 func TestTransactionRollbackDiscardsWrites(t *testing.T) {
 	ctx := context.Background()
 	_, repo := newTestPool(t)
@@ -357,7 +335,6 @@ func TestSchedulingConfigVersionsAreRetained(t *testing.T) {
 	f := newFixture(t, ctx, repo, "config")
 
 	now := time.Now().UTC()
-	// A new lead time only becomes usable later (spec.md section 13.6).
 	future, err := repo.CreateSchedulingConfig(ctx, domain.SchedulingConfig{
 		StationID: f.station.ID, MinimumLeadTime: 90 * time.Minute,
 		PrePassBuffer: time.Minute, PostPassBuffer: time.Minute,
@@ -369,7 +346,6 @@ func TestSchedulingConfigVersionsAreRetained(t *testing.T) {
 		t.Fatalf("create future config: %v", err)
 	}
 
-	// Right now the old configuration is still the effective one.
 	current, err := repo.LatestEffectiveSchedulingConfig(ctx, f.station.ID, now)
 	if err != nil {
 		t.Fatalf("current config: %v", err)
@@ -378,7 +354,6 @@ func TestSchedulingConfigVersionsAreRetained(t *testing.T) {
 		t.Errorf("effective config = %v, want the original %v", current.ID, f.config.ID)
 	}
 
-	// After the delay the new configuration takes over.
 	later, err := repo.LatestEffectiveSchedulingConfig(ctx, f.station.ID, now.Add(2*time.Hour))
 	if err != nil {
 		t.Fatalf("later config: %v", err)
@@ -391,7 +366,6 @@ func TestSchedulingConfigVersionsAreRetained(t *testing.T) {
 	}
 }
 
-// The TLE we planned with must remain readable after a newer one arrives.
 func TestNewTLEDoesNotDisturbHistoricalPass(t *testing.T) {
 	ctx := context.Background()
 	_, repo := newTestPool(t)
@@ -449,13 +423,6 @@ func TestUnknownRecordIsNotFound(t *testing.T) {
 	}
 }
 
-// A change saved later must not be replaced by an earlier one that happens to
-// become effective afterwards.
-//
-// Saving a long lead time and then thinking better of it leaves two pending
-// changes. The short one becomes effective first; when the long one's moment
-// arrives it must not come back to life and undo the operator's latest
-// decision.
 func TestASupersededConfigurationDoesNotReturn(t *testing.T) {
 	ctx := context.Background()
 	_, repo := newTestPool(t)
@@ -463,7 +430,6 @@ func TestASupersededConfigurationDoesNotReturn(t *testing.T) {
 
 	now := time.Now().UTC()
 
-	// Saved first, effective last.
 	if _, err := repo.CreateSchedulingConfig(ctx, domain.SchedulingConfig{
 		StationID: f.station.ID, MinimumLeadTime: 90 * time.Minute,
 		PrePassBuffer: time.Minute, PostPassBuffer: time.Minute,
@@ -474,7 +440,6 @@ func TestASupersededConfigurationDoesNotReturn(t *testing.T) {
 		t.Fatalf("create long config: %v", err)
 	}
 
-	// Saved second, effective sooner. This is the operator's latest intent.
 	latest, err := repo.CreateSchedulingConfig(ctx, domain.SchedulingConfig{
 		StationID: f.station.ID, MinimumLeadTime: 10 * time.Minute,
 		PrePassBuffer: time.Minute, PostPassBuffer: time.Minute,
@@ -486,7 +451,6 @@ func TestASupersededConfigurationDoesNotReturn(t *testing.T) {
 		t.Fatalf("create short config: %v", err)
 	}
 
-	// Once both are effective, the one saved last still governs.
 	current, err := repo.LatestEffectiveSchedulingConfig(ctx, f.station.ID, now.Add(3*time.Hour))
 	if err != nil {
 		t.Fatalf("current config: %v", err)
@@ -499,8 +463,6 @@ func TestASupersededConfigurationDoesNotReturn(t *testing.T) {
 	}
 }
 
-// A change that has not taken effect is still worth reporting, so an operator
-// can see that their save landed.
 func TestPendingConfigurationIsVisible(t *testing.T) {
 	ctx := context.Background()
 	_, repo := newTestPool(t)
@@ -530,15 +492,11 @@ func TestPendingConfigurationIsVisible(t *testing.T) {
 		t.Errorf("pending = %v, want %v", pending.ID, saved.ID)
 	}
 
-	// Once it is in force it is no longer pending.
 	if _, err := repo.PendingSchedulingConfig(ctx, f.station.ID, now.Add(time.Hour)); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("pending after it applies = %v, want not found", err)
 	}
 }
 
-// A pending change that a later, already-effective change has superseded is
-// not waiting for anything: it will never apply, and saying otherwise would
-// mislead the operator who saved the later one.
 func TestASupersededPendingChangeIsNotReported(t *testing.T) {
 	ctx := context.Background()
 	_, repo := newTestPool(t)
@@ -546,7 +504,6 @@ func TestASupersededPendingChangeIsNotReported(t *testing.T) {
 
 	now := time.Now().UTC()
 
-	// Relaxation, saved first, still waiting.
 	if _, err := repo.CreateSchedulingConfig(ctx, domain.SchedulingConfig{
 		StationID: f.station.ID, MinimumLeadTime: time.Minute,
 		PrePassBuffer: time.Minute, PostPassBuffer: time.Minute,
@@ -557,7 +514,6 @@ func TestASupersededPendingChangeIsNotReported(t *testing.T) {
 		t.Fatalf("create relaxation: %v", err)
 	}
 
-	// Tightening, saved second, effective at once.
 	tightened, err := repo.CreateSchedulingConfig(ctx, domain.SchedulingConfig{
 		StationID: f.station.ID, MinimumLeadTime: time.Hour,
 		PrePassBuffer: time.Minute, PostPassBuffer: time.Minute,
@@ -573,7 +529,6 @@ func TestASupersededPendingChangeIsNotReported(t *testing.T) {
 		t.Errorf("pending = %v, want none: the relaxation was superseded", err)
 	}
 
-	// And it stays superseded once its moment passes.
 	current, err := repo.LatestEffectiveSchedulingConfig(ctx, f.station.ID, now.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("current: %v", err)

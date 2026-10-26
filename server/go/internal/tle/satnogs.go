@@ -11,18 +11,13 @@ import (
 	"time"
 )
 
-// DefaultSatNOGSURL is the SatNOGS DB API root, verified live: the /tle/
-// endpoint answers unauthenticated and returns an empty array with HTTP 200
-// for an unknown catalog number.
 const DefaultSatNOGSURL = "https://db.satnogs.org/api"
 
-// SatNOGS is the fallback orbital data provider.
 type SatNOGS struct {
 	baseURL string
 	client  *http.Client
 }
 
-// NewSatNOGS builds the SatNOGS provider. An empty baseURL uses the default.
 func NewSatNOGS(baseURL string, timeout time.Duration) *SatNOGS {
 	if baseURL == "" {
 		baseURL = DefaultSatNOGSURL
@@ -32,7 +27,6 @@ func NewSatNOGS(baseURL string, timeout time.Duration) *SatNOGS {
 
 func (s *SatNOGS) Name() Source { return SourceSatNOGS }
 
-// satnogsTLE mirrors the fields of the /tle/ response that Aagasa uses.
 type satnogsTLE struct {
 	Title      string `json:"tle0"`
 	Line1      string `json:"tle1"`
@@ -93,8 +87,6 @@ func (s *SatNOGS) Fetch(ctx context.Context, noradID int) (Set, error) {
 	return set, nil
 }
 
-// Metadata is presentation information about a satellite. Every field is
-// optional: missing metadata must never block tracking (spec.md section 11.2).
 type Metadata struct {
 	Name       string `json:"name"`
 	AltNames   string `json:"names"`
@@ -108,8 +100,6 @@ type Metadata struct {
 	NoradCatID int    `json:"norad_cat_id"`
 }
 
-// FetchMetadata retrieves display metadata. Callers treat failure as a
-// degraded result, not an error worth failing a catalogue operation over.
 func (s *SatNOGS) FetchMetadata(ctx context.Context, noradID int) (Metadata, error) {
 	endpoint, err := url.Parse(s.baseURL + "/satellites/")
 	if err != nil {
@@ -152,8 +142,6 @@ func (s *SatNOGS) FetchMetadata(ctx context.Context, noradID int) (Metadata, err
 	return entries[0], nil
 }
 
-// AsMap converts metadata to the shape stored on the satellite record,
-// omitting empty fields so absence stays visible.
 func (m Metadata) AsMap() map[string]any {
 	fields := map[string]string{
 		"name": m.Name, "alt_names": m.AltNames, "status": m.Status,

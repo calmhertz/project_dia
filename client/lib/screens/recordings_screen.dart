@@ -8,12 +8,6 @@ import '../widgets/states.dart';
 import 'pass_detail_screen.dart';
 import 'satellites_screen.dart' show describeError;
 
-/// Everything the station has captured that this user may see
-/// (client-spec section 20).
-///
-/// A recording is only ever reachable through a pass, so each row says which
-/// pass produced it and the download goes through the same authorization the
-/// pass has.
 class RecordingsScreen extends StatefulWidget {
   const RecordingsScreen({super.key});
 
@@ -166,8 +160,6 @@ class _RecordingRow extends StatelessWidget {
         trailing: recording.isPublic
             ? const Icon(Icons.public, size: 18)
             : const Icon(Icons.chevron_right),
-        // Downloading happens on the pass page, where the pass state and any
-        // other output from the same pass are visible together.
         onTap: recording.passId == null
             ? null
             : () => Navigator.of(context).push(

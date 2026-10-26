@@ -5,22 +5,14 @@ import '../api/api_exception.dart';
 import '../models/models.dart';
 import 'token_store.dart';
 
-/// Where the app is in the sign-in flow.
 enum SessionStatus {
-  /// Restoring a stored session at startup.
   restoring,
   signedOut,
 
-  /// Signed in but the Server requires a password change before anything else
-  /// (spec.md section 17.1).
   passwordChangeRequired,
   signedIn,
 }
 
-/// Holds the signed-in user and the session token.
-///
-/// Client-side role checks drive what is shown; the Server remains the
-/// authority (client-spec section 4).
 class Session extends ChangeNotifier {
   Session({required this.api, TokenStore? storage})
     : _storage = storage ?? const SecureTokenStore() {
@@ -40,13 +32,11 @@ class Session extends ChangeNotifier {
 
   bool get isSignedIn => _status == SessionStatus.signedIn;
 
-  /// Restore a stored session, if the Server still accepts it.
   Future<void> restore() async {
     String? stored;
     try {
       stored = await _storage.read();
     } catch (_) {
-      // Storage unavailable on this platform or locked; sign in again.
       stored = null;
     }
     if (stored == null || stored.isEmpty) {
@@ -64,12 +54,9 @@ class Session extends ChangeNotifier {
             : SessionStatus.signedIn,
       );
     } on ApiException {
-      // Expired or revoked: discard it rather than showing errors later.
       await _clearToken();
       _set(SessionStatus.signedOut);
     } on NetworkException {
-      // The Server is unreachable, which is not the same as being signed out.
-      // Keep the token and let the user retry.
       await _clearToken();
       _set(SessionStatus.signedOut);
     }
@@ -97,7 +84,6 @@ class Session extends ChangeNotifier {
     return false;
   }
 
-  /// Change the password. The Server revokes the session, so this signs out.
   Future<bool> changePassword(String current, String next) async {
     _error = null;
     try {
@@ -117,7 +103,6 @@ class Session extends ChangeNotifier {
     try {
       await api.logout();
     } catch (_) {
-      // Signing out locally matters more than telling the Server.
     }
     await _clearToken();
     _user = null;
@@ -136,7 +121,6 @@ class Session extends ChangeNotifier {
     try {
       await _storage.write(value);
     } catch (_) {
-      // A session that cannot be persisted still works for this run.
     }
   }
 
@@ -145,7 +129,6 @@ class Session extends ChangeNotifier {
     try {
       await _storage.clear();
     } catch (_) {
-      // Nothing to clean up.
     }
   }
 

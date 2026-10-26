@@ -105,7 +105,6 @@ def test_check_reports_a_missing_binary():
         SatDump(binary="satdump-does-not-exist").check()
 
 
-# Command construction -----------------------------------------------------
 
 SDR_SETTINGS = {"source": "rtlsdr", "samplerate": 2048000, "gain": 40}
 
@@ -151,7 +150,6 @@ def test_optional_settings_are_only_added_when_set():
     assert with_extras[with_extras.index("--ppm_correction") + 1] == "12"
 
 
-# A hostile pipeline name must stay a single argument, never shell syntax.
 def test_arguments_are_never_shell_interpreted():
     hostile = "noaa_apt; rm -rf /"
     command = SatDump(binary="satdump").build_live_command(
@@ -159,11 +157,9 @@ def test_arguments_are_never_shell_interpreted():
 
     assert hostile in command
     assert command.count(hostile) == 1
-    # No element got split on the shell metacharacters.
     assert not any(argument.strip() == "rm" for argument in command)
 
 
-# Process lifecycle --------------------------------------------------------
 
 def make_stub(tmp_path, body: str) -> str:
     """Write an executable stub standing in for the satdump binary."""
@@ -281,9 +277,6 @@ def test_captured_output_is_bounded(tmp_path):
     assert len(result.stdout) <= MAX_CAPTURED_OUTPUT
 
 
-# JSONC handling -----------------------------------------------------------
-# SatDump's pipeline files use comments, which strict JSON rejects. Parsing
-# them strictly silently hid most of the catalogue on a stock install.
 
 def test_line_and_block_comments_are_stripped():
     text = """
@@ -347,8 +340,6 @@ def test_real_installation_yields_a_full_catalogue():
 
     pipelines = discover_pipelines([system_dir])
 
-    # Well above the 81 that strict parsing produced.
     assert len(pipelines) > 150
     identifiers = {pipeline.identifier for pipeline in pipelines}
-    # A pipeline from a comment-bearing file must now be visible.
     assert "gk2a_lrit" in identifiers

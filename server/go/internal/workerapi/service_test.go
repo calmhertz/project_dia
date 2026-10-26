@@ -30,8 +30,6 @@ func TestInterceptorAcceptsCorrectSecret(t *testing.T) {
 	}
 }
 
-// Every rejection path must be Unauthenticated so an unauthenticated Worker can
-// never reach a handler.
 func TestInterceptorRejectsBadCredentials(t *testing.T) {
 	cases := map[string]metadata.MD{
 		"no metadata":      nil,

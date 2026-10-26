@@ -16,68 +16,40 @@ import (
 	"aagasa/internal/domain"
 )
 
-// ErrNotFound is returned when a lookup matches no row.
 var ErrNotFound = errors.New("not found")
 
-// ErrStationOverlap is returned when a pass would overlap an existing live
-// reservation on the same station (spec.md section 13.3).
 var ErrStationOverlap = errors.New("station reservation overlaps an existing pass")
 
-// ErrReferenced is returned when a row cannot be removed because other
-// records depend on it. The database enforces this on purpose: history
-// outlives the account or catalogue entry that produced it.
 var ErrReferenced = errors.New("other records still reference this")
 
-// ErrDuplicate is returned when a unique constraint rejects a write.
 var ErrDuplicate = errors.New("duplicate record")
 
-// ErrSerialization is returned when PostgreSQL aborted the statement to break
-// a deadlock or a serialization conflict. The operation was not applied and is
-// safe to retry.
 var ErrSerialization = errors.New("serialization conflict")
 
-// PostgreSQL SQLSTATEs for contention that resolves on retry.
 const (
 	serializationFailure = "40001"
 	deadlockDetected     = "40P01"
 )
 
-// createPassRetries bounds how many times an insert is retried.
-//
-// Concurrent inserts against the station exclusion constraint make each other
-// wait, and enough simultaneous waiters can deadlock. PostgreSQL aborts one to
-// break it; retrying then produces the correct answer, which is either the row
-// or a clean overlap conflict.
 const createPassRetries = 5
 
 const overlapConstraintName = "passes_no_station_overlap"
 
-// querier is the subset of pgx shared by a pool and a transaction, so the same
-// repository methods run inside or outside a transaction.
 type querier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
-// Repository reads and writes Aagasa's relational domain records.
-//
-// It is deliberately thin: it maps rows to domain types and surfaces database
-// invariants as typed errors. Scheduling and authorization rules belong to
-// later phases.
 type Repository struct {
 	db querier
-	// pool is nil for a transaction-scoped repository, which cannot nest.
 	pool *pgxpool.Pool
 }
 
-// NewRepository builds a Repository over an open pool.
 func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{db: pool, pool: pool}
 }
 
-// InTx runs fn inside a transaction, rolling back unless fn returns nil.
-// The Repository handed to fn routes every query through that transaction.
 func (r *Repository) InTx(ctx context.Context, fn func(*Repository) error) error {
 	if r.pool == nil {
 		return errors.New("nested transactions are not supported")
@@ -94,8 +66,6 @@ func (r *Repository) InTx(ctx context.Context, fn func(*Repository) error) error
 	return tx.Commit(ctx)
 }
 
-// translate maps PostgreSQL constraint violations onto typed errors so callers
-// do not have to inspect driver internals.
 func translate(err error) error {
 	if err == nil {
 		return nil
@@ -119,8 +89,6 @@ func translate(err error) error {
 	return err
 }
 
-// isNoRows reports whether a query returned nothing, which some upserts use
-// to mean "the existing row was already identical".
 func isNoRows(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
 }
@@ -138,12 +106,9 @@ func duration(secs float64) time.Duration {
 	return time.Duration(secs * float64(time.Second))
 }
 
-// Users -------------------------------------------------------------------
 
 const userColumns = `id, username, password_hash, role, must_change_password, created_at, updated_at`
 
-// CreateUser inserts a user. The database rejects any hash that is not Argon2id
-// and any attempt to create a second Root.
 func (r *Repository) CreateUser(ctx context.Context, user domain.User) (domain.User, error) {
 	row := r.db.QueryRow(ctx, `
 		INSERT INTO users (username, password_hash, role, must_change_password)
@@ -170,7 +135,6 @@ func scanUser(row pgx.Row) (domain.User, error) {
 	return user, translate(err)
 }
 
-// Stations ----------------------------------------------------------------
 
 const stationColumns = `id, name, latitude, longitude, altitude_m, timezone, active_rf_band, created_at, updated_at`
 
@@ -196,7 +160,6 @@ func scanStation(row pgx.Row) (domain.Station, error) {
 	return s, translate(err)
 }
 
-// Scheduling configuration ------------------------------------------------
 
 const schedulingConfigColumns = `
 	id, station_id,
@@ -207,7 +170,6 @@ const schedulingConfigColumns = `
 	EXTRACT(EPOCH FROM recording_post_roll)::double precision,
 	minimum_elevation_degrees, created_by, created_at, effective_from`
 
-// CreateSchedulingConfig inserts a new configuration version.
 func (r *Repository) CreateSchedulingConfig(ctx context.Context, cfg domain.SchedulingConfig) (domain.SchedulingConfig, error) {
 	row := r.db.QueryRow(ctx, `
 		INSERT INTO scheduling_configs (
@@ -225,13 +187,7 @@ func (r *Repository) CreateSchedulingConfig(ctx context.Context, cfg domain.Sche
 	return scanSchedulingConfig(row)
 }
 
-// LatestEffectiveSchedulingConfig returns the newest configuration that is
-// already usable at the given moment.
 func (r *Repository) LatestEffectiveSchedulingConfig(ctx context.Context, stationID uuid.UUID, at time.Time) (domain.SchedulingConfig, error) {
-	// Most recently *created* among those already in force, not the one with
-	// the latest effective_from. Saving a short delay after a long one must
-	// not let the older, later-arriving change come back to life and
-	// silently replace the operator's latest intent.
 	row := r.db.QueryRow(ctx, `
 		SELECT `+schedulingConfigColumns+`
 		FROM scheduling_configs
@@ -241,17 +197,8 @@ func (r *Repository) LatestEffectiveSchedulingConfig(ctx context.Context, statio
 	return scanSchedulingConfig(row)
 }
 
-// PendingSchedulingConfig returns a saved configuration that has not taken
-// effect yet, if there is one.
-//
-// Without this a Root who shortens the lead time sees the old values come
-// straight back and concludes nothing was saved (spec.md section 13.6 makes
-// the delay deliberate, but it has to be visible).
 func (r *Repository) PendingSchedulingConfig(ctx context.Context, stationID uuid.UUID,
 	at time.Time) (domain.SchedulingConfig, error) {
-	// Only a change created *after* whatever is in force can still apply.
-	// An older pending change has already been superseded and will never
-	// take effect, so reporting it as waiting would be a lie.
 	row := r.db.QueryRow(ctx, `
 		SELECT `+schedulingConfigColumns+`
 		FROM scheduling_configs
@@ -282,7 +229,6 @@ func scanSchedulingConfig(row pgx.Row) (domain.SchedulingConfig, error) {
 	return cfg, nil
 }
 
-// Workers -----------------------------------------------------------------
 
 const workerColumns = `id, station_id, name, worker_version, connection_state,
 	last_seen_at, last_sync_at, desired_state_generation, pending_uploads,
@@ -310,7 +256,6 @@ func scanWorker(row interface{ Scan(...any) error }) (domain.Worker, error) {
 	return w, translate(err)
 }
 
-// Satellites --------------------------------------------------------------
 
 const satelliteColumns = `id, norad_id, name, description, metadata, is_schedulable, created_at, updated_at`
 
@@ -346,7 +291,6 @@ func scanSatellite(row pgx.Row) (domain.Satellite, error) {
 	return s, nil
 }
 
-// TLE records -------------------------------------------------------------
 
 const tleColumns = `id, satellite_id, line1, line2, epoch, source, fetched_at`
 
@@ -359,8 +303,6 @@ func (r *Repository) CreateTLERecord(ctx context.Context, record domain.TLERecor
 	return scanTLE(row)
 }
 
-// LatestTLERecord returns the newest orbital data held for a satellite. It is
-// the last known-good record when refreshes fail (spec.md section 11.3).
 func (r *Repository) LatestTLERecord(ctx context.Context, satelliteID uuid.UUID) (domain.TLERecord, error) {
 	row := r.db.QueryRow(ctx, `
 		SELECT `+tleColumns+` FROM tle_records
@@ -376,7 +318,6 @@ func scanTLE(row pgx.Row) (domain.TLERecord, error) {
 	return t, translate(err)
 }
 
-// Passes ------------------------------------------------------------------
 
 const passColumns = `id, station_id, satellite_id, requested_by, tle_record_id,
 	scheduling_config_id, status, visibility, band, aos_at, los_at, tca_at,
@@ -386,12 +327,6 @@ const passColumns = `id, station_id, satellite_id, requested_by, tle_record_id,
 	pipeline_id, radio_settings, approved_by, approved_at,
 	cancellation_reason, cancelled_by, cancelled_at, created_at, updated_at`
 
-// CreatePass inserts a pass. A reservation overlapping a live pass on the same
-// station is rejected by the database, so concurrent requests cannot race.
-//
-// Contention that PostgreSQL resolves by aborting a statement is retried: the
-// answer is then either the inserted row or a genuine overlap conflict, never
-// a deadlock surfaced to the caller.
 func (r *Repository) CreatePass(ctx context.Context, pass domain.Pass) (domain.Pass, error) {
 	var lastErr error
 	for attempt := 0; attempt < createPassRetries; attempt++ {
@@ -403,7 +338,6 @@ func (r *Repository) CreatePass(ctx context.Context, pass domain.Pass) (domain.P
 		if ctx.Err() != nil {
 			return domain.Pass{}, ctx.Err()
 		}
-		// Brief, growing pause so retrying contenders do not line up again.
 		time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
 	}
 	return domain.Pass{}, lastErr
@@ -437,7 +371,6 @@ func (r *Repository) GetPassByID(ctx context.Context, id uuid.UUID) (domain.Pass
 	return scanPass(row)
 }
 
-// SetPassStatus moves a pass to a new status.
 func (r *Repository) SetPassStatus(ctx context.Context, id uuid.UUID, status domain.PassStatus) error {
 	tag, err := r.db.Exec(ctx, `UPDATE passes SET status = $2 WHERE id = $1`, id, status)
 	if err != nil {
@@ -469,10 +402,7 @@ func scanPass(row pgx.Row) (domain.Pass, error) {
 	return p, nil
 }
 
-// Audit -------------------------------------------------------------------
 
-// AppendAudit writes an audit record. Audit rows cannot later be changed or
-// removed; the database enforces that.
 func (r *Repository) AppendAudit(ctx context.Context, record domain.AuditRecord) (domain.AuditRecord, error) {
 	previous, err := toJSON(record.PreviousState)
 	if err != nil {
@@ -495,7 +425,6 @@ func (r *Repository) AppendAudit(ctx context.Context, record domain.AuditRecord)
 	return record, nil
 }
 
-// CountAuditRecords reports how many audit rows exist for an entity.
 func (r *Repository) CountAuditRecords(ctx context.Context, entityType, entityID string) (int, error) {
 	var count int
 	err := r.db.QueryRow(ctx,
@@ -504,20 +433,13 @@ func (r *Repository) CountAuditRecords(ctx context.Context, entityType, entityID
 	return count, translate(err)
 }
 
-// AuditFilter narrows an audit listing.
 type AuditFilter struct {
-	// Action limits to one action name. Empty means any.
 	Action string
-	// EntityType and EntityID limit to one subject. Empty means any.
 	EntityType string
 	EntityID   string
 	Limit      int
 }
 
-// ListAuditRecords returns audit rows newest first.
-//
-// Read-only by construction: there is no update or delete counterpart,
-// because the audit trail is evidence (spec.md section 17.3).
 func (r *Repository) ListAuditRecords(ctx context.Context, filter AuditFilter) ([]domain.AuditRecord, error) {
 	query := `SELECT id, actor_user_id, action, entity_type, entity_id,
 		previous_state, new_state, reason, created_at

@@ -19,7 +19,6 @@ const (
 
 const bearerPrefix = "Bearer "
 
-// currentUser returns the authenticated user placed by requireAuth.
 func currentUser(r *http.Request) domain.User {
 	user, _ := r.Context().Value(userContextKey).(domain.User)
 	return user
@@ -38,7 +37,6 @@ func bearerToken(r *http.Request) string {
 	return strings.TrimSpace(strings.TrimPrefix(header, bearerPrefix))
 }
 
-// requireAuth rejects requests without a valid session.
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := bearerToken(r)
@@ -63,9 +61,6 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// requirePasswordChanged blocks every operation for a user who still owes a
-// password change. spec.md section 17.1 requires the change to happen before
-// normal use, so this closes the bootstrap credential's window.
 func (s *Server) requirePasswordChanged(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if currentUser(r).MustChangePassword {
@@ -77,7 +72,6 @@ func (s *Server) requirePasswordChanged(next http.HandlerFunc) http.HandlerFunc 
 	}
 }
 
-// requireRole rejects a caller below the required authority.
 func (s *Server) requireRole(required domain.UserRole, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !auth.AtLeast(currentUser(r), required) {
@@ -88,12 +82,10 @@ func (s *Server) requireRole(required domain.UserRole, next http.HandlerFunc) ht
 	}
 }
 
-// authenticated composes the checks every normal endpoint needs.
 func (s *Server) authenticated(next http.HandlerFunc) http.HandlerFunc {
 	return s.requireAuth(s.requirePasswordChanged(next))
 }
 
-// roleGated composes authentication, the password-change gate and a role check.
 func (s *Server) roleGated(required domain.UserRole, next http.HandlerFunc) http.HandlerFunc {
 	return s.requireAuth(s.requirePasswordChanged(s.requireRole(required, next)))
 }

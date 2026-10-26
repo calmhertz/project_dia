@@ -11,15 +11,10 @@ import (
 	"aagasa/internal/domain"
 )
 
-// ErrRootProtected is returned when a caller tries to delete or demote Root.
-// The database trigger is the authority; this maps it to a typed error.
 var ErrRootProtected = errors.New("root user cannot be deleted or demoted")
 
-// restrictViolation is the SQLSTATE the root-protection trigger raises.
 const restrictViolation = "23001"
 
-// foreignKeyViolation is what a RESTRICT reference raises, which is a
-// different refusal with a different answer.
 const foreignKeyViolation = "23503"
 
 func translateUser(err error) error {
@@ -33,15 +28,12 @@ func translateUser(err error) error {
 	return translate(err)
 }
 
-// CountUsers reports how many accounts exist. Zero means the system has not
-// been bootstrapped.
 func (r *Repository) CountUsers(ctx context.Context) (int, error) {
 	var count int
 	err := r.db.QueryRow(ctx, `SELECT count(*) FROM users`).Scan(&count)
 	return count, translate(err)
 }
 
-// ListUsers returns all accounts ordered by creation.
 func (r *Repository) ListUsers(ctx context.Context) ([]domain.User, error) {
 	rows, err := r.db.Query(ctx, `SELECT `+userColumns+` FROM users ORDER BY created_at`)
 	if err != nil {
@@ -61,7 +53,6 @@ func (r *Repository) ListUsers(ctx context.Context) ([]domain.User, error) {
 	return users, translate(rows.Err())
 }
 
-// SetPassword stores a new hash and clears the forced-change flag.
 func (r *Repository) SetPassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
 	tag, err := r.db.Exec(ctx, `
 		UPDATE users SET password_hash = $2, must_change_password = false
@@ -75,7 +66,6 @@ func (r *Repository) SetPassword(ctx context.Context, id uuid.UUID, passwordHash
 	return nil
 }
 
-// SetUserRole changes a user's role. Demoting Root is rejected by the database.
 func (r *Repository) SetUserRole(ctx context.Context, id uuid.UUID, role domain.UserRole) error {
 	tag, err := r.db.Exec(ctx, `UPDATE users SET role = $2 WHERE id = $1`, id, role)
 	if err != nil {
@@ -87,7 +77,6 @@ func (r *Repository) SetUserRole(ctx context.Context, id uuid.UUID, role domain.
 	return nil
 }
 
-// DeleteUser removes an account. Deleting Root is rejected by the database.
 func (r *Repository) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	tag, err := r.db.Exec(ctx, `DELETE FROM users WHERE id = $1`, id)
 	if err != nil {
@@ -99,18 +88,13 @@ func (r *Repository) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// System state ------------------------------------------------------------
 
-// SystemInitializedAt reports when first-run setup completed, or nil if it has
-// not (spec.md section 23).
 func (r *Repository) SystemInitializedAt(ctx context.Context) (*time.Time, error) {
 	var at *time.Time
 	err := r.db.QueryRow(ctx, `SELECT initialized_at FROM system_state WHERE id = true`).Scan(&at)
 	return at, translate(err)
 }
 
-// MarkSystemInitialized records first-run completion. Calling it again is a
-// no-op so setup cannot be silently re-run.
 func (r *Repository) MarkSystemInitialized(ctx context.Context, at time.Time) error {
 	_, err := r.db.Exec(ctx, `
 		UPDATE system_state SET initialized_at = $1
@@ -118,9 +102,7 @@ func (r *Repository) MarkSystemInitialized(ctx context.Context, at time.Time) er
 	return translate(err)
 }
 
-// Station configuration ---------------------------------------------------
 
-// UpsertStationBandConfig stores the antenna and radio settings for one band.
 func (r *Repository) UpsertStationBandConfig(ctx context.Context, cfg domain.StationBandConfig) error {
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO station_band_configs (station_id, band, antenna_description,
@@ -138,7 +120,6 @@ func (r *Repository) UpsertStationBandConfig(ctx context.Context, cfg domain.Sta
 	return translate(err)
 }
 
-// GetStationBandConfigs returns every band configuration for a station.
 func (r *Repository) GetStationBandConfigs(ctx context.Context, stationID uuid.UUID) ([]domain.StationBandConfig, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT station_id, band, antenna_description, center_frequency_hz,
@@ -162,7 +143,6 @@ func (r *Repository) GetStationBandConfigs(ctx context.Context, stationID uuid.U
 	return configs, translate(rows.Err())
 }
 
-// UpsertStationHardwareConfig stores the rotator and SDR settings.
 func (r *Repository) UpsertStationHardwareConfig(ctx context.Context, cfg domain.StationHardwareConfig) error {
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO station_hardware_configs (station_id, rotator_serial_port,
@@ -181,7 +161,6 @@ func (r *Repository) UpsertStationHardwareConfig(ctx context.Context, cfg domain
 	return translate(err)
 }
 
-// GetStationHardwareConfig returns the rotator and SDR settings.
 func (r *Repository) GetStationHardwareConfig(ctx context.Context, stationID uuid.UUID) (domain.StationHardwareConfig, error) {
 	var cfg domain.StationHardwareConfig
 	err := r.db.QueryRow(ctx, `
@@ -195,7 +174,6 @@ func (r *Repository) GetStationHardwareConfig(ctx context.Context, stationID uui
 	return cfg, translate(err)
 }
 
-// ListStations returns every station.
 func (r *Repository) ListStations(ctx context.Context) ([]domain.Station, error) {
 	rows, err := r.db.Query(ctx, `SELECT `+stationColumns+` FROM stations ORDER BY created_at`)
 	if err != nil {
@@ -215,8 +193,6 @@ func (r *Repository) ListStations(ctx context.Context) ([]domain.Station, error)
 	return stations, translate(rows.Err())
 }
 
-// SetStationActiveBand switches the station between VHF and UHF. Existing
-// approved passes are untouched (spec.md section 13.8).
 func (r *Repository) SetStationActiveBand(ctx context.Context, stationID uuid.UUID, band domain.RFBand) error {
 	tag, err := r.db.Exec(ctx, `UPDATE stations SET active_rf_band = $2 WHERE id = $1`, stationID, band)
 	if err != nil {
@@ -228,10 +204,6 @@ func (r *Repository) SetStationActiveBand(ctx context.Context, stationID uuid.UU
 	return nil
 }
 
-// UpdateStation changes station identity and location.
-//
-// The active band is deliberately not settable here: switching bands is its
-// own decision with its own consequences, and has SetStationActiveBand.
 func (r *Repository) UpdateStation(ctx context.Context, station domain.Station) (domain.Station, error) {
 	row := r.db.QueryRow(ctx, `
 		UPDATE stations

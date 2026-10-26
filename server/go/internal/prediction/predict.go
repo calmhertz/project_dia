@@ -13,11 +13,8 @@ import (
 	predictionv1 "aagasa/internal/gen/prediction/v1"
 )
 
-// ErrInvalidRequest means the prediction service rejected the request as
-// unusable. It is distinct from an outage: the caller must fix the input.
 var ErrInvalidRequest = errors.New("invalid prediction request")
 
-// TrackPoint is one antenna pointing instruction.
 type TrackPoint struct {
 	At               time.Time
 	AzimuthDegrees   float64
@@ -25,7 +22,6 @@ type TrackPoint struct {
 	RangeKm          float64
 }
 
-// Pass is one predicted satellite pass over the station.
 type Pass struct {
 	AOS time.Time
 	TCA time.Time
@@ -38,11 +34,9 @@ type Pass struct {
 	MaxElevationDegrees float64
 	Duration            time.Duration
 
-	// Track is the pointing timeline, empty unless requested.
 	Track []TrackPoint
 }
 
-// Request describes a prediction to compute.
 type Request struct {
 	Line1 string
 	Line2 string
@@ -56,21 +50,15 @@ type Request struct {
 	SearchStart time.Time
 	SearchEnd   time.Time
 
-	// TrackStep of zero omits the pointing timeline.
 	TrackStep time.Duration
 	MaxPasses int
 }
 
-// Result carries the predicted passes.
 type Result struct {
 	NoradID int
 	Passes  []Pass
 }
 
-// PredictPasses asks the Python service to compute passes.
-//
-// The Server never computes passes itself: there is exactly one predictor in
-// Aagasa (spec.md section 12).
 func (c *Client) PredictPasses(ctx context.Context, request Request) (Result, error) {
 	proto := &predictionv1.PredictPassesRequest{
 		Tle: &predictionv1.TwoLineElements{Line1: request.Line1, Line2: request.Line2},

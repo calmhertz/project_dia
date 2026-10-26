@@ -11,10 +11,8 @@ import (
 	"aagasa/internal/store"
 )
 
-// maxRequestBody bounds request bodies so a large upload cannot exhaust memory.
-const maxRequestBody = 1 << 20 // 1 MiB
+const maxRequestBody = 1 << 20
 
-// errorResponse is the single error shape the API returns.
 type errorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
@@ -35,14 +33,11 @@ func writeError(logger *slog.Logger, w http.ResponseWriter, code int, kind, mess
 	writeJSON(logger, w, code, errorResponse{Error: kind, Message: message})
 }
 
-// internalError logs the detail and returns an opaque message. Internal
-// diagnostics never reach the client (RULES.md section 13).
 func (s *Server) internalError(w http.ResponseWriter, context string, err error) {
 	s.logger.Error(context, slog.String("error", err.Error()))
 	writeError(s.logger, w, http.StatusInternalServerError, "internal_error", "internal server error")
 }
 
-// decodeJSON reads a bounded JSON body and rejects unknown fields.
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 	decoder := json.NewDecoder(r.Body)
@@ -50,14 +45,12 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}
-	// A second JSON value in one body is a sign of a confused or hostile client.
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return errors.New("body must contain a single JSON object")
 	}
 	return nil
 }
 
-// writeDomainError maps known service errors onto status codes.
 func (s *Server) writeDomainError(w http.ResponseWriter, context string, err error) {
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials):
@@ -75,8 +68,6 @@ func (s *Server) writeDomainError(w http.ResponseWriter, context string, err err
 	case errors.Is(err, store.ErrDuplicate):
 		writeError(s.logger, w, http.StatusConflict, "conflict", "already exists")
 	case errors.Is(err, store.ErrReferenced):
-		// The database refuses on purpose: passes and their history outlive
-		// the account that requested them (spec.md section 13).
 		writeError(s.logger, w, http.StatusConflict, "in_use",
 			"other records still reference this, so it cannot be removed")
 	default:

@@ -15,8 +15,6 @@ from aagasa_worker.planstore import PlanStore
 
 logger = logging.getLogger(__name__)
 
-# Highest PassPlan schema version this Worker understands. A newer plan is
-# refused rather than executed partially (worker-spec section 8).
 SUPPORTED_PLAN_VERSION = 1
 
 
@@ -41,9 +39,6 @@ class DesiredStateSync:
 
         plans = []
         for plan in response.plans.plans:
-            # A plan this Worker cannot fully understand is skipped rather
-            # than stored: executing part of it would be worse than not
-            # running it at all.
             if not 1 <= plan.plan_version <= SUPPORTED_PLAN_VERSION:
                 logger.error(
                     "skipping pass %s: plan version %d, this worker supports up to %d",

@@ -13,8 +13,6 @@ MIN_SHARED_SECRET_LENGTH = 32
 
 @dataclass(frozen=True)
 class Config:
-    # The Worker is configured with a name; the Server resolves the
-    # identifiers during registration (spec.md section 7).
     worker_name: str
 
     server_grpc_address: str

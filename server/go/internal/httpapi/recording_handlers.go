@@ -38,8 +38,6 @@ func toRecordingView(recording store.Recording) recordingView {
 	}
 }
 
-// recordingsListLimit bounds a listing; a station accumulates recordings
-// indefinitely and a client does not want them all at once.
 const recordingsListLimit = 200
 
 type recordingListView struct {
@@ -49,12 +47,6 @@ type recordingListView struct {
 	Visibility  string    `json:"visibility"`
 }
 
-// handleListRecordings returns the recordings a caller may see, newest first.
-//
-// The scope mirrors the pass listing: own recordings by default, the public
-// history, or everything for Admin and Root. Visibility is applied in the
-// query rather than filtered afterwards, so a private recording cannot leak
-// through the listing (spec.md section 16).
 func (s *Server) handleListRecordings(w http.ResponseWriter, r *http.Request) {
 	actor := currentUser(r)
 
@@ -97,10 +89,6 @@ func (s *Server) handleListRecordings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(s.logger, w, http.StatusOK, map[string]any{"recordings": views})
 }
 
-// handleListPassRecordings returns the recordings for one pass.
-//
-// Visibility follows the pass: a private pass's recordings are for its owner,
-// Admins and Root only (spec.md section 16).
 func (s *Server) handleListPassRecordings(w http.ResponseWriter, r *http.Request) {
 	id, ok := s.pathUUID(w, r)
 	if !ok {
@@ -113,7 +101,6 @@ func (s *Server) handleListPassRecordings(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if !scheduling.CanViewPass(currentUser(r), pass) {
-		// Same as reading the pass itself: existence is private.
 		writeError(s.logger, w, http.StatusNotFound, "not_found", "not found")
 		return
 	}
@@ -131,10 +118,6 @@ func (s *Server) handleListPassRecordings(w http.ResponseWriter, r *http.Request
 	writeJSON(s.logger, w, http.StatusOK, map[string]any{"recordings": views})
 }
 
-// handleDownloadRecording streams a stored recording.
-//
-// The caller's right to it is derived from the pass, so a link cannot be
-// shared to bypass the pass's visibility.
 func (s *Server) handleDownloadRecording(w http.ResponseWriter, r *http.Request) {
 	recordingID := r.PathValue("id")
 	if !isSHA256Hex(recordingID) {
@@ -164,8 +147,6 @@ func (s *Server) handleDownloadRecording(w http.ResponseWriter, r *http.Request)
 
 	file, err := os.Open(recording.StoredPath)
 	if err != nil {
-		// The metadata says it exists but the file does not; report honestly
-		// rather than serving an empty body.
 		s.logger.Error("open recording", "error", err.Error(),
 			"recording_id", recording.RecordingID)
 		writeError(s.logger, w, http.StatusNotFound, "content_missing",
@@ -177,11 +158,9 @@ func (s *Server) handleDownloadRecording(w http.ResponseWriter, r *http.Request)
 	name := filepath.Base(recording.RelativePath)
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.FormatInt(recording.SizeBytes, 10))
-	// Quoted so a name with spaces is handled, and only the base name is used.
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 
 	if _, err := io.Copy(w, file); err != nil {
-		// The client went away mid-download; nothing useful to send now.
 		s.logger.Warn("recording download interrupted", "error", err.Error())
 	}
 }

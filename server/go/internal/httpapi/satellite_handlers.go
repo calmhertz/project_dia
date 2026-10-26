@@ -12,7 +12,6 @@ import (
 	"aagasa/internal/store"
 )
 
-// tleHistoryLimit bounds how much orbital history one response carries.
 const tleHistoryLimit = 20
 
 type satelliteView struct {
@@ -44,7 +43,6 @@ type tleView struct {
 	Epoch     time.Time `json:"epoch"`
 	Source    string    `json:"source"`
 	FetchedAt time.Time `json:"fetched_at"`
-	// AgeHours lets the UI show freshness without doing date arithmetic.
 	AgeHours float64 `json:"age_hours"`
 }
 
@@ -56,8 +54,6 @@ func toTLEView(record domain.TLERecord, now time.Time) tleView {
 	}
 }
 
-// handleListSatellites returns the catalogue. Any authenticated user may read
-// it: satellites are not private information.
 func (s *Server) handleListSatellites(w http.ResponseWriter, r *http.Request) {
 	satellites, err := s.repo.ListSatellites(r.Context())
 	if err != nil {
@@ -84,8 +80,6 @@ func (s *Server) handleGetSatellite(w http.ResponseWriter, r *http.Request) {
 
 	response := map[string]any{"satellite": toSatelliteView(satellite)}
 
-	// A satellite with no orbital data is still a valid record; report the
-	// absence rather than failing the read.
 	if record, err := s.catalog.CurrentTLE(r.Context(), satellite.ID); err == nil {
 		response["current_tle"] = toTLEView(record, time.Now().UTC())
 	} else if !errors.Is(err, store.ErrNotFound) {
@@ -119,8 +113,6 @@ type addSatelliteRequest struct {
 	Name    string `json:"name"`
 }
 
-// handleAddSatellite registers a satellite by catalog number. Root only, per
-// spec.md section 17.1's catalogue administration.
 func (s *Server) handleAddSatellite(w http.ResponseWriter, r *http.Request) {
 	if !auth.CanConfigureStation(currentUser(r)) {
 		writeError(s.logger, w, http.StatusForbidden, "forbidden", "catalogue administration is root only")
@@ -143,8 +135,6 @@ func (s *Server) handleAddSatellite(w http.ResponseWriter, r *http.Request) {
 		writeError(s.logger, w, http.StatusConflict, "conflict", "satellite is already in the catalogue")
 		return
 	case errors.Is(err, catalog.ErrNoOrbitalData):
-		// The providers are external; a failure there is not our fault and
-		// not the client's.
 		writeError(s.logger, w, http.StatusBadGateway, "no_orbital_data",
 			"no orbital data is available for that catalog number")
 		return
@@ -231,8 +221,6 @@ func (s *Server) handleDeleteSatellite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.repo.DeleteSatellite(r.Context(), id); err != nil {
-		// A satellite with passes cannot be removed: history is preserved
-		// rather than deleted (spec.md section 21).
 		writeError(s.logger, w, http.StatusConflict, "conflict",
 			"this satellite has passes and cannot be deleted")
 		return
@@ -244,7 +232,6 @@ func (s *Server) handleDeleteSatellite(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleRefreshTLEs triggers an immediate refresh of the whole catalogue.
 func (s *Server) handleRefreshTLEs(w http.ResponseWriter, r *http.Request) {
 	if !auth.CanManageUsers(currentUser(r)) {
 		writeError(s.logger, w, http.StatusForbidden, "forbidden", "not permitted")
@@ -285,8 +272,6 @@ func (s *Server) handleRefreshTLEs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleRefreshSatelliteMetadata re-fetches display metadata for one satellite.
-// Useful when enrichment failed transiently when the satellite was added.
 func (s *Server) handleRefreshSatelliteMetadata(w http.ResponseWriter, r *http.Request) {
 	if !auth.CanConfigureStation(currentUser(r)) {
 		writeError(s.logger, w, http.StatusForbidden, "forbidden", "catalogue administration is root only")
@@ -305,7 +290,6 @@ func (s *Server) handleRefreshSatelliteMetadata(w http.ResponseWriter, r *http.R
 
 	metadata, err := s.catalog.RefreshMetadata(r.Context(), satellite)
 	if err != nil {
-		// The provider is external; its outage is not a client error.
 		writeError(s.logger, w, http.StatusBadGateway, "metadata_unavailable",
 			"the metadata provider did not answer")
 		return

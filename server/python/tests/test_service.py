@@ -14,7 +14,6 @@ from aagasa_prediction.main import build_server
 def server_address():
     config = Config(address="127.0.0.1:0", log_level="INFO", max_workers=2)
     server = build_server(config)
-    # add_insecure_port on port 0 returns the port actually bound.
     port = server.add_insecure_port("127.0.0.1:0")
     server.start()
     try:
@@ -32,7 +31,6 @@ def test_health_reports_serving(server_address):
     assert response.version == __version__
 
 
-# PredictPasses over real gRPC ---------------------------------------------
 
 def _timestamp(moment):
     from google.protobuf.timestamp_pb2 import Timestamp
@@ -82,7 +80,6 @@ def test_predict_passes_without_a_track(server_address):
     assert all(len(satellite_pass.track) == 0 for satellite_pass in response.passes)
 
 
-# A bad request must be INVALID_ARGUMENT, not an opaque internal error.
 def test_invalid_request_is_reported_as_invalid_argument(server_address):
     bad = _request()
     bad.observer.latitude_degrees = 120.0
@@ -109,7 +106,6 @@ def test_unusable_tle_is_reported_as_invalid_argument(server_address):
     assert caught.value.code() == grpc.StatusCode.INVALID_ARGUMENT
 
 
-# An error must never leak a Python traceback to the caller.
 def test_errors_do_not_leak_internals(server_address):
     bad = _request()
     bad.observer.longitude_degrees = 999.0

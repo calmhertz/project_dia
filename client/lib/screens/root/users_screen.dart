@@ -7,11 +7,6 @@ import '../../state/session.dart';
 import '../../widgets/states.dart';
 import '../satellites_screen.dart' show describeError;
 
-/// Accounts and roles.
-///
-/// Root is protected by the Server and by the database: it cannot be created,
-/// promoted to, demoted or deleted (spec.md section 17.1). This screen does
-/// not offer those actions, and the Server refuses them anyway.
 class UsersScreen extends StatefulWidget {
   const UsersScreen({super.key});
 
@@ -105,8 +100,6 @@ class _UsersScreenState extends State<UsersScreen> {
       _report('${user.username} deleted.');
       _load();
     } on ApiException catch (error) {
-      // The database refuses on purpose: a pass and its history outlive the
-      // account that requested it (spec.md section 13).
       _report(
         error.code == 'in_use'
             ? '${user.username} has passes on record, so the account cannot '
@@ -142,7 +135,6 @@ class _UsersScreenState extends State<UsersScreen> {
             itemCount: users.length,
             itemBuilder: (context, index) {
               final user = users[index];
-              // Root is untouchable, and so is the account you are using.
               final protected = user.isRoot || user.id == me?.id;
 
               return Card(
@@ -255,8 +247,6 @@ class _NewUserDialogState extends State<_NewUserDialog> {
                 helperText: 'They must change it at first sign-in.',
                 border: OutlineInputBorder(),
               ),
-              // The Server sets the policy; this catches the obvious case
-              // without pretending to be the authority.
               validator: (value) => (value == null || value.length < 12)
                   ? 'Use at least 12 characters'
                   : null,

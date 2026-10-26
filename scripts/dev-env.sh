@@ -1,29 +1,9 @@
 #!/usr/bin/env bash
-# A repeatable Aagasa environment (plan.md V17).
-#
-#   scripts/dev-env.sh up        databases, migrations, services, fixtures
-#   scripts/dev-env.sh down      stop the services, leave the data
-#   scripts/dev-env.sh reset     down, then delete the data as well
-#   scripts/dev-env.sh status    what is running
-#   scripts/dev-env.sh logs [server|worker|prediction]
-#
-# By default the Worker runs against **simulated hardware**, so the whole
-# system works with nothing attached. To use the real rotator and dongle:
-#
-#   AAGASA_HARDWARE=real scripts/dev-env.sh up
-#
-# Several environments can exist side by side. Each name gets its own
-# containers, ports and data, so a test run cannot disturb a developer's:
-#
-#   AAGASA_ENV_NAME=test AAGASA_PORT_OFFSET=100 scripts/dev-env.sh up
-#
-# Nothing here is a production deployment; that is deploy/ and plan.md V18.
 
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAME="${AAGASA_ENV_NAME:-dev}"
-# Every port moves together, so one number keeps a whole environment apart.
 OFFSET="${AAGASA_PORT_OFFSET:-0}"
 RUN="${AAGASA_RUN_DIR:-$HOME/.local/share/aagasa/$NAME}"
 LOGS="$RUN/logs"
@@ -37,8 +17,6 @@ GRPC_PORT=$((9090 + OFFSET))
 PREDICTION_PORT=$((9091 + OFFSET))
 WEB_PORT=$((5001 + OFFSET))
 
-# Development credentials. Real deployments generate their own; these exist so
-# the environment comes up the same way every time.
 SHARED_SECRET="${AAGASA_WORKER_SHARED_SECRET:-aagasa-development-shared-secret-0001}"
 ROOT_PASSWORD="${AAGASA_ROOT_PASSWORD:-development-root-password}"
 
@@ -64,11 +42,6 @@ die()  { printf 'dev-env: %s\n' "$1" >&2; exit 1; }
 container_running() { podman inspect -f '{{.State.Running}}' "$1" 2>/dev/null | grep -q true; }
 pid_of() { [ -f "$RUN/$1.pid" ] && kill -0 "$(cat "$RUN/$1.pid")" 2>/dev/null && cat "$RUN/$1.pid"; }
 
-# Services are started in their own process group and stopped as a group.
-#
-# `go run` and `uv run` both launch the real program as a child, so killing
-# the recorded pid leaves the server or the Worker holding its port. Killing
-# the group takes the wrapper and what it spawned.
 start_background() {
     local name="$1"; shift
     if pid_of "$name" >/dev/null; then
@@ -89,7 +62,6 @@ stop_background() {
     local name="$1" pid
     pid="$(pid_of "$name")" || { note "$name not running"; return 0; }
 
-    # Negative pid: the whole group, which is why setsid was used to start it.
     kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
     for _ in $(seq 1 20); do
         kill -0 "$pid" 2>/dev/null || break
@@ -110,7 +82,6 @@ wait_for_http() {
     return 1
 }
 
-# Databases ------------------------------------------------------------------
 
 start_databases() {
     say "Databases"
@@ -140,11 +111,6 @@ start_databases() {
     die "PostgreSQL did not become ready"
 }
 
-# Binaries, not `go run`.
-#
-# `go run` reports any nonzero exit as 1, which hides the seed's "already
-# configured" answer, and it leaves the real program as a child process that
-# outlives a kill. Building once solves both and starts faster.
 BIN="$RUN/bin"
 
 build() {
@@ -163,7 +129,6 @@ migrate() {
     note "up to date"
 }
 
-# Services -------------------------------------------------------------------
 
 start_services() {
     say "Services"
@@ -189,13 +154,9 @@ start_worker() {
     if [ "$HARDWARE" = "simulated" ]; then
         rotator_port="$RUN/rotator"
         start_background rotator python3 "$ROOT/scripts/simulated-hardware/rotator.py" --link "$rotator_port"
-        # Wait for the link, or the Worker starts before its rotator exists.
         for _ in $(seq 1 20); do [ -e "$rotator_port" ] && break; sleep 0.5; done
         [ -e "$rotator_port" ] || die "the simulated rotator did not start"
-        # The stand-ins shadow the real binaries for this process only.
         worker_path="$ROOT/scripts/simulated-hardware:$PATH"
-        # And a fixed pipeline set, so what the station reports is the same on
-        # a machine with SatDump installed and one without.
         export AAGASA_SATDUMP_PIPELINES_DIR="$ROOT/scripts/simulated-hardware/pipelines"
     fi
 
@@ -218,8 +179,6 @@ seed() {
 
     case "$result" in
     0) return 0 ;;
-    # An environment someone is already using has its own credentials, which
-    # seeding cannot guess. That is not a reason to refuse to start it.
     3) note "already set up with its own credentials; fixtures left alone"; return 0 ;;
     *) die "seeding failed" ;;
     esac
@@ -235,7 +194,6 @@ serve_client() {
     note "client on http://127.0.0.1:$WEB_PORT"
 }
 
-# Commands -------------------------------------------------------------------
 
 case "${1:-up}" in
 up)

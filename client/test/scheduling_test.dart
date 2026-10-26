@@ -4,7 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'support.dart';
 
-/// A signed-in app with a one-satellite catalogue.
 FakeServer station() {
   final server = FakeServer();
   server.responses['api/auth/login'] = {
@@ -34,8 +33,6 @@ FakeServer station() {
 }
 
 Future<void> openApp(WidgetTester tester, FakeServer server) async {
-  // Tall enough that a whole form or pass page is on screen, so a test taps
-  // what a user would see rather than scrolling first.
   tester.view.physicalSize = const Size(1000, 2000);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
@@ -68,7 +65,6 @@ Future<void> openPass(WidgetTester tester, FakeServer server) async {
 }
 
 void main() {
-  // Choosing a pass --------------------------------------------------------
 
   testWidgets('a satellite shows its upcoming passes', (tester) async {
     await openSatellite(tester, station());
@@ -90,8 +86,6 @@ void main() {
     expect(find.text('No passes in the next 48 hours'), findsOneWidget);
   });
 
-  // A non-schedulable satellite must not offer a request that would be
-  // refused (client-spec section 12).
   testWidgets('a non-schedulable satellite offers no request', (tester) async {
     final server = station();
     server.responses['api/satellites'] = {
@@ -117,7 +111,6 @@ void main() {
     expect(find.text('Share publicly'), findsOneWidget);
   });
 
-  // Requesting -------------------------------------------------------------
 
   testWidgets('an accepted request returns to the satellite', (tester) async {
     final server = station();
@@ -136,8 +129,6 @@ void main() {
     expect(find.text('Request this pass'), findsNothing);
   });
 
-  // client-spec section 15: a conflict says the slot is taken and nothing
-  // about who holds it.
   testWidgets('a station conflict is explained without naming the holder', (
     tester,
   ) async {
@@ -201,7 +192,6 @@ void main() {
     );
   });
 
-  // Pass detail ------------------------------------------------------------
 
   testWidgets('a pass shows its window and status', (tester) async {
     final server = station();
@@ -217,7 +207,6 @@ void main() {
     expect(find.text('Approved'), findsOneWidget);
   });
 
-  // spec.md section 15: an overridden pass tells its owner what happened.
   testWidgets('a root override is explained to the owner', (tester) async {
     final server = station();
     server.responses['api/passes?scope=mine'] = {
@@ -252,7 +241,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Cancel this pass?'), findsOneWidget);
 
-    // Backing out must not cancel anything.
     await tester.tap(find.text('Keep it'));
     await tester.pumpAndSettle();
     expect(server.seen.any((entry) => entry.contains('/cancel')), isFalse);
@@ -265,7 +253,6 @@ void main() {
     expect(server.seen.any((entry) => entry.contains('/cancel')), isTrue);
   });
 
-  // Recordings -------------------------------------------------------------
 
   testWidgets('recordings are listed and can be downloaded', (tester) async {
     final server = station();
@@ -302,8 +289,6 @@ void main() {
     );
   });
 
-  // A completed pass with nothing to show is a real outcome, not an error
-  // (client-spec section 20).
   testWidgets('a completed pass with no recordings says so', (tester) async {
     final server = station();
     server.responses['api/passes?scope=mine'] = {
@@ -335,7 +320,6 @@ void main() {
     );
   });
 
-  // A refused recording list must not be mistaken for an empty one.
   testWidgets('a refused recording list is shown as an error', (tester) async {
     final server = station();
     server.responses['api/passes?scope=mine'] = {

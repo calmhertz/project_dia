@@ -42,7 +42,6 @@ func TestEnsureMongoCollectionsIsRepeatable(t *testing.T) {
 	ctx := context.Background()
 	database := newTestMongo(t)
 
-	// Bootstrap must be safe to run on every deployment, not just the first.
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := store.EnsureMongoCollections(ctx, database); err != nil {
 			t.Fatalf("attempt %d: %v", attempt, err)
@@ -58,14 +57,12 @@ func TestEnsureMongoCollectionsIsRepeatable(t *testing.T) {
 		if err := cursor.All(ctx, &indexes); err != nil {
 			t.Fatalf("read %s indexes: %v", collection, err)
 		}
-		// The default _id index plus the two declared for each collection.
 		if len(indexes) != 3 {
 			t.Errorf("%s has %d indexes, want 3", collection, len(indexes))
 		}
 	}
 }
 
-// Retrying a pass execution write must not create a second logical record.
 func TestPassExecutionAttemptIsUnique(t *testing.T) {
 	ctx := context.Background()
 	database := newTestMongo(t)
@@ -153,8 +150,6 @@ func TestSessionExpires(t *testing.T) {
 	}
 }
 
-// The raw token must not appear as a Redis key: a dump of the keyspace should
-// not hand an attacker usable credentials.
 func TestSessionTokenIsNotStoredInTheKey(t *testing.T) {
 	ctx := context.Background()
 	client := newTestRedis(t)

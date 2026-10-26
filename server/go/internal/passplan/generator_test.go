@@ -21,12 +21,9 @@ const argon2idHash = "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHR2YWx1ZQ$aGFzaHZh
 const (
 	issLine1 = "1 25544U 98067A   26236.17729445  .00008773  00000+0  16369-3 0  9990"
 	issLine2 = "2 25544  51.6333 323.5788 0007697  77.8713 282.3138 15.49600847582298"
-	// A later epoch for the same satellite, representing a refresh.
 	newerLine1 = "1 25544U 98067A   26237.17729445  .00008773  00000+0  16369-3 0  9991"
 )
 
-// fixedPredictor returns a scripted track, so plan generation is tested
-// without the prediction service.
 type fixedPredictor struct {
 	aos, los time.Time
 	points   int
@@ -151,7 +148,6 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatalf("create pass: %v", err)
 	}
-	// Approve it: only an approved pass has an executable plan.
 	if err := repo.ApprovePass(ctx, pass.ID, user.ID, time.Now().UTC()); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
@@ -168,7 +164,6 @@ func newFixture(t *testing.T) *fixture {
 	}
 }
 
-// A plan must carry everything execution needs (spec.md section 13.2).
 func TestPlanIsSelfContained(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
@@ -191,7 +186,6 @@ func TestPlanIsSelfContained(t *testing.T) {
 		t.Error("station or worker id missing")
 	}
 
-	// Orbital elements travel with the plan.
 	if plan.GetElements().GetLine1() != issLine1 || plan.GetElements().GetLine2() != issLine2 {
 		t.Error("orbital elements missing")
 	}
@@ -199,7 +193,6 @@ func TestPlanIsSelfContained(t *testing.T) {
 		t.Error("the plan does not name the TLE version it used")
 	}
 
-	// Timing.
 	if !plan.GetAos().AsTime().Equal(f.pass.AOSAt) || !plan.GetLos().AsTime().Equal(f.pass.LOSAt) {
 		t.Error("execution timing does not match the pass")
 	}
@@ -207,7 +200,6 @@ func TestPlanIsSelfContained(t *testing.T) {
 		t.Errorf("max elevation = %f", plan.GetMaxElevationDegrees())
 	}
 
-	// Radio settings resolved from the station's band configuration.
 	if plan.GetRadio().GetFrequencyHz() != 137_100_000 {
 		t.Errorf("frequency = %d", plan.GetRadio().GetFrequencyHz())
 	}
@@ -232,7 +224,6 @@ func TestPlanIsSelfContained(t *testing.T) {
 	}
 }
 
-// The recording window uses the recording margins, not the scheduling buffers.
 func TestRecordingWindowUsesRecordingMargins(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
@@ -252,14 +243,11 @@ func TestRecordingWindowUsesRecordingMargins(t *testing.T) {
 		t.Errorf("recording end = %s, want LOS plus the 15s post-roll", plan.GetRecordingEnd().AsTime())
 	}
 
-	// The 2-minute scheduling buffers are a Server concern and must not leak
-	// into the plan.
 	if plan.GetRecordingStart().AsTime().Equal(f.pass.ReservedFrom) {
 		t.Error("the recording window used the scheduling buffer")
 	}
 }
 
-// The track must span the pass so the Worker has pointing throughout.
 func TestTrackSpansThePass(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
@@ -283,7 +271,6 @@ func TestTrackSpansThePass(t *testing.T) {
 	}
 }
 
-// Determinism: the same inputs always produce the same generation hash.
 func TestGenerationIsDeterministic(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
@@ -314,8 +301,6 @@ func TestGenerationIsDeterministic(t *testing.T) {
 	}
 }
 
-// generated_at is excluded from the hash, so a regeneration at a later moment
-// is still recognisably the same plan.
 func TestGenerationIgnoresTheTimestamp(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
@@ -356,7 +341,6 @@ func TestGenerationChangesWhenContentChanges(t *testing.T) {
 	}
 }
 
-// Exit criterion: a plan survives a protobuf round trip.
 func TestPlanRoundTripsThroughProtobuf(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
@@ -390,7 +374,6 @@ func TestPlanRoundTripsThroughProtobuf(t *testing.T) {
 	if decoded.GetElements().GetLine1() != plan.GetElements().GetLine1() {
 		t.Error("orbital elements did not survive the round trip")
 	}
-	// Re-hashing the decoded plan must agree.
 	rehashed, err := passplan.Generation(decoded)
 	if err != nil {
 		t.Fatalf("Generation: %v", err)
@@ -406,8 +389,6 @@ func TestUnmarshalRejectsGarbage(t *testing.T) {
 	}
 }
 
-// Exit criterion: refreshing a satellite's TLE must not corrupt an existing
-// plan's identity.
 func TestNewerTLEDoesNotChangeAnExistingPlan(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
@@ -417,7 +398,6 @@ func TestNewerTLEDoesNotChangeAnExistingPlan(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	// A refresh stores newer elements for the same satellite.
 	newer, err := f.repo.CreateTLERecord(ctx, domain.TLERecord{
 		SatelliteID: f.satellite.ID, Line1: newerLine1, Line2: issLine2,
 		Epoch: time.Now().UTC(), Source: domain.SourceCelestrak,
@@ -435,7 +415,6 @@ func TestNewerTLEDoesNotChangeAnExistingPlan(t *testing.T) {
 		t.Fatalf("regenerate: %v", err)
 	}
 
-	// The plan is pinned to the elements the pass was planned with.
 	if after.GetGeneration() != before.GetGeneration() {
 		t.Error("a TLE refresh changed an existing plan's identity")
 	}
@@ -447,7 +426,6 @@ func TestNewerTLEDoesNotChangeAnExistingPlan(t *testing.T) {
 	}
 }
 
-// Persistence --------------------------------------------------------------
 
 func TestPlanIsPersistedAndReadBack(t *testing.T) {
 	ctx := context.Background()
@@ -478,8 +456,6 @@ func TestPlanIsPersistedAndReadBack(t *testing.T) {
 	}
 }
 
-// Regenerating an unchanged plan must be a no-op, so a Worker is not told its
-// desired state changed when nothing did.
 func TestRegeneratingAnUnchangedPlanReportsNoChange(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
@@ -512,7 +488,6 @@ func TestStoredPlansForStationListsApprovedFuturePasses(t *testing.T) {
 		t.Fatalf("plans = %d, want 1", len(plans))
 	}
 
-	// A cancelled pass drops out of the desired state.
 	if err := f.repo.CancelPass(ctx, f.pass.ID, f.pass.RequestedBy,
 		domain.CancelledByOwner, time.Now().UTC()); err != nil {
 		t.Fatalf("cancel: %v", err)
@@ -539,7 +514,6 @@ func TestSetGenerationSummarisesTheWholeDesiredState(t *testing.T) {
 	if single == "" {
 		t.Fatal("no set generation produced")
 	}
-	// Stable for the same content, different when the set changes.
 	if passplan.SetGeneration([]*workerv1.PassPlan{plan}) != single {
 		t.Error("the set generation is not stable")
 	}
@@ -548,9 +522,7 @@ func TestSetGenerationSummarisesTheWholeDesiredState(t *testing.T) {
 	}
 }
 
-// Refusals -----------------------------------------------------------------
 
-// Only an approved pass is executable.
 func TestUnapprovedPassHasNoPlan(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
@@ -566,8 +538,6 @@ func TestUnapprovedPassHasNoPlan(t *testing.T) {
 	}
 }
 
-// A plan with no pointing timeline would leave the antenna still, so an
-// unusable prediction must fail rather than produce a silent empty track.
 func TestPredictionFailureIsNotASilentEmptyTrack(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
@@ -577,19 +547,15 @@ func TestPredictionFailureIsNotASilentEmptyTrack(t *testing.T) {
 		t.Fatal("expected an error when the track cannot be computed")
 	}
 
-	// And nothing was stored.
 	if _, err := f.repo.GetPassPlan(ctx, f.pass.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("a plan was stored despite the failure: %v", err)
 	}
 }
 
-// Without radio settings the Worker could not tune, so refuse rather than
-// hand over a plan it cannot execute.
 func TestMissingRadioConfigurationIsRefused(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
 
-	// The pass asks for UHF, which this station has no configuration for.
 	pass := f.pass
 	pass.Band = domain.BandUHF
 
@@ -598,7 +564,6 @@ func TestMissingRadioConfigurationIsRefused(t *testing.T) {
 	}
 }
 
-// A per-pass override wins over the station default.
 func TestPassRadioOverridesWinOverStationDefaults(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
@@ -619,13 +584,11 @@ func TestPassRadioOverridesWinOverStationDefaults(t *testing.T) {
 	if plan.GetRadio().GetGainDb() != 28.5 {
 		t.Errorf("gain = %f, want the override", plan.GetRadio().GetGainDb())
 	}
-	// Unspecified values still come from the station.
 	if plan.GetRadio().GetSampleRateHz() != 2_048_000 {
 		t.Errorf("sample rate = %d, want the station default", plan.GetRadio().GetSampleRateHz())
 	}
 }
 
-// A custom pipeline travels inline: the Worker cannot fetch it mid-pass.
 func TestCustomPipelineDefinitionTravelsWithThePlan(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
@@ -640,7 +603,6 @@ func TestCustomPipelineDefinitionTravelsWithThePlan(t *testing.T) {
 		t.Fatalf("CreatePipeline: %v", err)
 	}
 
-	// The generator reads the definition from the record it is given.
 	loader := passplan.NewGenerator(f.repo, f.predictor)
 	pass := f.pass
 	pass.PipelineID = &pipeline.ID

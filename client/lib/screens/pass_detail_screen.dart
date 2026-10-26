@@ -8,7 +8,6 @@ import '../widgets/formatting.dart';
 import '../widgets/states.dart';
 import 'satellites_screen.dart' show describeError;
 
-/// One pass, its lifecycle and any recordings it produced.
 class PassDetailScreen extends StatefulWidget {
   const PassDetailScreen({super.key, required this.passId, this.satelliteName});
 
@@ -34,16 +33,11 @@ class _PassDetailScreenState extends State<PassDetailScreen> {
   void _load() {
     final api = context.read<Session>().api;
     setState(() {
-      // ignore() marks a failure as already observed, so a request that fails
-      // before its FutureBuilder attaches is reported by the page rather than
-      // escaping as an unhandled error. The builders still see the error.
       _pass = api.pass(widget.passId)..ignore();
       _recordings = api.recordingsForPass(widget.passId)..ignore();
     });
   }
 
-  /// Approve or reject, for an Admin reviewing a request (client-spec
-  /// section 17). The Server decides; this only reports what it answered.
   Future<void> _decide(bool approve) async {
     setState(() => _deciding = true);
     try {
@@ -122,8 +116,6 @@ class _PassDetailScreenState extends State<PassDetailScreen> {
           final theme = Theme.of(context);
           final canCancel =
               pass.status == 'pending_approval' || pass.status == 'approved';
-          // Offered to Admin and Root only, and only while a decision is
-          // still open. The Server enforces the same rule.
           final canDecide =
               pass.isPending &&
               (context.watch<Session>().user?.isAdmin ?? false);
@@ -173,8 +165,6 @@ class _PassDetailScreenState extends State<PassDetailScreen> {
                         'Produces',
                         describeRecordingMode(pass.recordingMode),
                       ),
-                      // Present only when the Server disclosed it, which is
-                      // how a public pass hides its owner from strangers.
                       if (pass.requestedBy != null)
                         _Row('Requested by', pass.requestedBy!),
                     ],
@@ -268,8 +258,6 @@ class _Recordings extends StatelessWidget {
 
         final recordings = snapshot.data ?? const <Recording>[];
         if (recordings.isEmpty) {
-          // A completed pass without recordings is a real state; never assume
-          // one exists (client-spec section 20).
           return Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -323,8 +311,6 @@ class _RecordingTileState extends State<_RecordingTile> {
       final bytes = await context.read<Session>().api.downloadRecording(
         widget.recording,
       );
-      // On web this triggers the browser's save dialog; elsewhere the bytes
-      // stay in memory and the snackbar below is the whole result.
       final fileName = recordingFileName(widget.recording.relativePath);
       saveRecordingDownload(fileName, bytes);
       if (!mounted) return;

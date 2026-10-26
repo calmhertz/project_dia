@@ -17,14 +17,6 @@ void main() {
   runApp(AagasaApp(api: ApiClient()));
 }
 
-/// Discards key events the engine could not map to both a physical and a
-/// logical key.
-///
-/// On the web a browser sometimes reports a key with only one of the two set,
-/// most visibly when a password manager fills the sign-in form. Flutter's
-/// `KeyEventManager` asserts that both are present and the app dies on the
-/// assertion in a debug build. The event carries no usable key either way, so
-/// dropping it loses nothing; everything else is passed straight through.
 void _dropUnmappableKeyEvents() {
   final dispatcher = PlatformDispatcher.instance;
   final delegate = dispatcher.onKeyData;
@@ -41,7 +33,6 @@ class AagasaApp extends StatelessWidget {
 
   final ApiClient api;
 
-  /// Supplied by tests; built from [api] otherwise.
   final Session? session;
 
   @override
@@ -51,7 +42,6 @@ class AagasaApp extends StatelessWidget {
       child: MaterialApp(
         title: 'Aagasa',
         debugShowCheckedModeBanner: false,
-        // Dark only in V1; no light theme is supplied.
         themeMode: ThemeMode.dark,
         darkTheme: AppTheme.dark(),
         home: const _Root(),
@@ -60,7 +50,6 @@ class AagasaApp extends StatelessWidget {
   }
 }
 
-/// Chooses the screen for the current session state.
 class _Root extends StatelessWidget {
   const _Root();
 
@@ -73,8 +62,6 @@ class _Root extends StatelessWidget {
         body: LoadingState(message: 'Starting Aagasa'),
       ),
       SessionStatus.signedOut => const LoginScreen(),
-      // The Server refuses everything else until this is done, so the app
-      // shows nothing else either (spec.md section 17.1).
       SessionStatus.passwordChangeRequired => const ChangePasswordScreen(),
       SessionStatus.signedIn => const FirstRunGate(),
     };

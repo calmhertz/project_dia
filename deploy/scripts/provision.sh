@@ -1,16 +1,4 @@
 #!/usr/bin/env bash
-# Provision an Aagasa host from nothing (plan.md V18).
-#
-#   sudo deploy/scripts/provision.sh server
-#   sudo deploy/scripts/provision.sh worker
-#
-# Idempotent: run it again after changing anything and it converges. It
-# creates the directory layout, generates secrets that do not exist yet,
-# installs the Quadlet units and starts the services.
-#
-# It does not build images. Build them first (see deploy/README.md), because
-# building on the station is slower than copying an image to it and leaves a
-# toolchain on a machine that does not need one.
 
 set -uo pipefail
 
@@ -29,10 +17,6 @@ die()  { printf 'provision: %s\n' "$1" >&2; exit 1; }
 command -v podman >/dev/null || die "podman is required"
 command -v openssl >/dev/null || die "openssl is required, to generate secrets"
 
-# secret NAME GENERATOR - create a Podman secret if it does not exist.
-#
-# Never regenerate: rotating the Worker's shared secret behind its back would
-# take the station off the air.
 secret() {
     local name="$1" generator="$2"
     if podman secret inspect "$name" >/dev/null 2>&1; then
@@ -58,7 +42,6 @@ note "$STATE ready"
 say "Secrets"
 if [ "$ROLE" = "server" ]; then
     secret aagasa-postgres-password "openssl rand -hex 24"
-    # The URLs are built from the password so the two cannot drift apart.
     if ! podman secret inspect aagasa-postgres-url >/dev/null 2>&1; then
         password="$(podman secret inspect --showsecret --format '{{.SecretData}}' aagasa-postgres-password 2>/dev/null)"
         [ -n "$password" ] || die "cannot read the PostgreSQL password back to build its URL"
@@ -71,8 +54,6 @@ if [ "$ROLE" = "server" ]; then
     secret aagasa-redis-url "printf 'redis://127.0.0.1:6379/0'"
     secret aagasa-mongo-url "printf 'mongodb://127.0.0.1:27017'"
 fi
-# Both hosts need the same value; on the Worker, copy the Server's rather
-# than generating a second one.
 secret aagasa-worker-shared-secret "openssl rand -hex 32"
 
 if [ "$ROLE" = "server" ]; then
@@ -80,9 +61,6 @@ if [ "$ROLE" = "server" ]; then
     if [ -f "$TLS_DIR/tls.crt" ] && [ -f "$TLS_DIR/tls.key" ]; then
         note "certificate already in place"
     else
-        # A self-signed certificate so the station is encrypted from the first
-        # minute. Replace it with a real one; the Server reads whatever is at
-        # these paths on start.
         openssl req -x509 -newkey rsa:4096 -sha256 -days 825 -nodes \
             -keyout "$TLS_DIR/tls.key" -out "$TLS_DIR/tls.crt" \
             -subj "/CN=$(hostname -f 2>/dev/null || hostname)" \
@@ -90,9 +68,6 @@ if [ "$ROLE" = "server" ]; then
             >/dev/null 2>&1 || die "could not generate a certificate"
         note "self-signed certificate generated; replace it with a real one"
     fi
-    # The Server runs as uid 10001 inside its image and drops privileges, so
-    # a root-owned 0600 key is unreadable to it. Owner-only, owned by that
-    # uid: the key stays private and the service can start.
     chown 10001:10001 "$TLS_DIR/tls.key" "$TLS_DIR/tls.crt"
     chmod 0600 "$TLS_DIR/tls.key"
     chmod 0644 "$TLS_DIR/tls.crt"
@@ -112,8 +87,6 @@ systemctl daemon-reload
 note "installed to $UNITS"
 
 say "Logs"
-# Container output goes to journald; without a cap it grows until the disk
-# that holds the recordings is full.
 install -d -m 0755 /etc/systemd/journald.conf.d
 cat > /etc/systemd/journald.conf.d/aagasa.conf <<'CONF'
 # Aagasa: bound the journal so logs cannot fill the recording disk.

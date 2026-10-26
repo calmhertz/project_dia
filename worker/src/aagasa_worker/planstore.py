@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 DATABASE_FILENAME = "worker_state.db"
 
-# Owner-only: plans describe what the station will do and when.
 DATABASE_MODE = 0o600
 
 
@@ -36,7 +35,6 @@ class ExecutionState:
     CANCELLED = "cancelled"
 
 
-# A pass in a terminal state is never run again (spec.md sections 6.4 and 20).
 TERMINAL_STATES = frozenset({
     ExecutionState.COMPLETED,
     ExecutionState.FAILED,
@@ -44,7 +42,6 @@ TERMINAL_STATES = frozenset({
     ExecutionState.CANCELLED,
 })
 
-# States that still expect execution.
 PENDING_STATES = frozenset({ExecutionState.RECEIVED, ExecutionState.READY})
 
 SCHEMA = """
@@ -164,8 +161,6 @@ class PlanStore:
             self._path, check_same_thread=False, isolation_level=None
         )
         self._connection.row_factory = sqlite3.Row
-        # WAL survives a crash mid-transaction and allows a reader alongside
-        # the executor; FULL sync means a committed plan is really on disk.
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute("PRAGMA synchronous=FULL")
         self._connection.executescript(SCHEMA)
@@ -176,7 +171,6 @@ class PlanStore:
         with self._lock:
             self._connection.close()
 
-    # Desired state --------------------------------------------------------
 
     @property
     def generation(self) -> str:
@@ -228,7 +222,6 @@ class PlanStore:
                         continue
 
                     if current["state"] in TERMINAL_STATES:
-                        # Already run, missed or cancelled: leave it alone.
                         summary["unchanged"] += 1
                         continue
 
@@ -272,7 +265,6 @@ class PlanStore:
         )
         return summary
 
-    # Queries --------------------------------------------------------------
 
     def get(self, pass_id: str) -> StoredPlan | None:
         with self._lock:
@@ -309,7 +301,6 @@ class PlanStore:
             ).fetchone()
         return _to_plan(row) if row else None
 
-    # State transitions ----------------------------------------------------
 
     def mark_executing(self, pass_id: str, started_at: datetime) -> bool:
         """Claim a plan for execution.
@@ -384,7 +375,6 @@ class PlanStore:
             logger.warning("recovered %d interrupted pass(es)", len(interrupted))
         return interrupted
 
-    # History --------------------------------------------------------------
 
     def _record_history(self, pass_id: str, state: str, detail: str) -> None:
         with self._lock:
@@ -434,7 +424,6 @@ class PlanStore:
         ]
 
 
-    # Identity -------------------------------------------------------------
 
     def load_identity(self):
         """The cached identity, or None before the first registration."""
@@ -469,7 +458,6 @@ class PlanStore:
                     (key, value),
                 )
 
-    # Recordings -----------------------------------------------------------
 
     def record_recordings(self, recordings: list) -> int:
         """Register recordings a pass produced, ready for upload.

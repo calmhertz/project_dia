@@ -15,9 +15,7 @@ import (
 	"aagasa/internal/workerapi"
 )
 
-// Identity ----------------------------------------------------------------
 
-// The Worker is configured with a name; the Server owns the identifiers.
 func TestRegisterResolvesIdentityFromTheName(t *testing.T) {
 	env := newUploadEnv(t)
 	ctx := context.Background()
@@ -64,7 +62,6 @@ func TestRegisterRequiresAName(t *testing.T) {
 	}
 }
 
-// Heartbeat ---------------------------------------------------------------
 
 func (e *uploadEnv) newWorker(t *testing.T) domain.Worker {
 	t.Helper()
@@ -104,19 +101,16 @@ func TestHeartbeatBringsAWorkerOnline(t *testing.T) {
 	if updated.WorkerVersion != "0.1.0" {
 		t.Errorf("version = %q", updated.WorkerVersion)
 	}
-	// The backlog is visible to an operator during an outage.
 	if updated.PendingUploads != 3 || updated.PendingReports != 2 {
 		t.Errorf("backlog = %d uploads, %d reports", updated.PendingUploads, updated.PendingReports)
 	}
 }
 
-// A Worker holding the current generation should not be told to re-sync.
 func TestHeartbeatReportsWhetherStateIsCurrent(t *testing.T) {
 	env := newUploadEnv(t)
 	ctx := context.Background()
 	worker := env.newWorker(t)
 
-	// With no plans, the empty set still has a stable generation.
 	first, err := env.client.Heartbeat(ctx, &workerv1.HeartbeatRequest{
 		WorkerId: worker.ID.String(), StateGeneration: ""})
 	if err != nil {
@@ -126,7 +120,6 @@ func TestHeartbeatReportsWhetherStateIsCurrent(t *testing.T) {
 		t.Error("an empty generation was reported as current")
 	}
 
-	// Echoing back what the Server said makes the Worker current.
 	second, err := env.client.Heartbeat(ctx, &workerv1.HeartbeatRequest{
 		WorkerId: worker.ID.String(), StateGeneration: first.GetDesiredGeneration()})
 	if err != nil {
@@ -140,7 +133,6 @@ func TestHeartbeatReportsWhetherStateIsCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetWorkerByID: %v", err)
 	}
-	// Only reaching the current state counts as a completed sync.
 	if updated.LastSyncAt == nil {
 		t.Error("last_sync_at was not recorded once current")
 	}
@@ -165,9 +157,7 @@ func TestHeartbeatFromAnUnknownWorkerIsRefused(t *testing.T) {
 	}
 }
 
-// Going offline -----------------------------------------------------------
 
-// spec.md section 6.3: a station that stops reporting must be shown offline.
 func TestAWorkerThatStopsReportingGoesOffline(t *testing.T) {
 	env := newUploadEnv(t)
 	ctx := context.Background()
@@ -178,7 +168,6 @@ func TestAWorkerThatStopsReportingGoesOffline(t *testing.T) {
 		t.Fatalf("Heartbeat: %v", err)
 	}
 
-	// Nothing goes offline while it is still reporting.
 	names, err := env.repo.MarkStaleWorkersOffline(ctx, time.Now().UTC().Add(-workerapi.StaleAfter))
 	if err != nil {
 		t.Fatalf("MarkStaleWorkersOffline: %v", err)
@@ -187,7 +176,6 @@ func TestAWorkerThatStopsReportingGoesOffline(t *testing.T) {
 		t.Errorf("a live worker was marked offline: %v", names)
 	}
 
-	// Once the last heartbeat is older than the window, it does.
 	names, err = env.repo.MarkStaleWorkersOffline(ctx, time.Now().UTC().Add(time.Minute))
 	if err != nil {
 		t.Fatalf("MarkStaleWorkersOffline: %v", err)
@@ -205,7 +193,6 @@ func TestAWorkerThatStopsReportingGoesOffline(t *testing.T) {
 	}
 }
 
-// The transition is reported once, so the log does not repeat every sweep.
 func TestGoingOfflineIsReportedOnce(t *testing.T) {
 	env := newUploadEnv(t)
 	ctx := context.Background()
@@ -228,7 +215,6 @@ func TestGoingOfflineIsReportedOnce(t *testing.T) {
 	}
 }
 
-// A Worker that comes back must be shown online again.
 func TestAReturningWorkerComesBackOnline(t *testing.T) {
 	env := newUploadEnv(t)
 	ctx := context.Background()
@@ -257,8 +243,6 @@ func TestAReturningWorkerComesBackOnline(t *testing.T) {
 }
 
 func TestHeartbeatTimingMatchesTheSpecifiedPolicy(t *testing.T) {
-	// spec.md section 7: about every five seconds, offline after about
-	// fifteen.
 	if workerapi.HeartbeatInterval != 5*time.Second {
 		t.Errorf("HeartbeatInterval = %v", workerapi.HeartbeatInterval)
 	}
@@ -292,8 +276,6 @@ func TestListWorkersReportsOperationalState(t *testing.T) {
 	}
 }
 
-// spec.md section 22 counts worker state changes as auditable. A heartbeat
-// every five seconds is not an event; a transition is.
 
 func auditActions(t *testing.T, env *uploadEnv, entityID string) []string {
 	t.Helper()
@@ -340,16 +322,11 @@ func TestWorkerStateChangesAreAudited(t *testing.T) {
 	if registered != 1 {
 		t.Errorf("worker.registered recorded %d times, want 1: %v", registered, actions)
 	}
-	// Three heartbeats, one transition: the trail records the change, not the
-	// traffic.
 	if online != 1 {
 		t.Errorf("worker.online recorded %d times, want 1: %v", online, actions)
 	}
 }
 
-// The record carries no actor, because no person did it. That is only
-// possible because the audit trail keeps its actor column free of a foreign
-// key (migration 00006).
 func TestASystemAuditRecordHasNoActor(t *testing.T) {
 	env := newUploadEnv(t)
 	ctx := context.Background()

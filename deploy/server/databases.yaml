@@ -1,8 +1,3 @@
-# Aagasa datastores pod (PostgreSQL, Redis, MongoDB).
-# Deployed with: podman kube play --network aagasa-net deploy/server/databases.yaml
-#
-# EDIT THE PASSWORDS/VALUES BELOW.
-# PostgreSQL password must match AAGASA_POSTGRES_URL in deploy/server/.env.
 apiVersion: v1
 kind: Pod
 metadata:

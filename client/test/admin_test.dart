@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'support.dart';
 
-/// A signed-in app for a given role.
 FakeServer stationAs(String role) {
   final server = FakeServer();
   server.responses['api/auth/login'] = {
@@ -102,10 +101,7 @@ Future<void> openAdminTab(
 }
 
 void main() {
-  // Who sees administration ------------------------------------------------
 
-  // client-spec section 4: the client hides what a role cannot use, and the
-  // Server refuses it regardless.
   testWidgets('a normal user is not offered administration', (tester) async {
     await openAs(tester, stationAs('user'));
 
@@ -125,7 +121,6 @@ void main() {
     expect(find.text('Administration'), findsWidgets);
   });
 
-  // A normal user's dashboard must not turn into an operations console.
   testWidgets('a normal user sees no operational summary', (tester) async {
     await openAs(tester, stationAs('user'));
 
@@ -174,7 +169,6 @@ void main() {
     expect(find.text('Nothing waiting for approval'), findsOneWidget);
   });
 
-  // Approval queue ---------------------------------------------------------
 
   testWidgets('the queue shows what a decision needs', (tester) async {
     final server = stationAs('admin');
@@ -187,7 +181,6 @@ void main() {
     expect(find.text('VHF'), findsOneWidget);
     expect(find.text('Raw recording'), findsOneWidget);
     expect(find.text('Public'), findsOneWidget);
-    // The requester is named from the account list, not left as an id.
     expect(find.text('operator'), findsOneWidget);
     expect(find.text('Approve'), findsOneWidget);
     expect(find.text('Reject'), findsOneWidget);
@@ -246,7 +239,6 @@ void main() {
     );
   });
 
-  // A decision the Server refuses must not look like it succeeded.
   testWidgets('a refused decision is reported', (tester) async {
     final server = stationAs('admin');
     server.responses['api/passes?scope=all&status=pending_approval'] = {
@@ -264,7 +256,6 @@ void main() {
     expect(find.text('this pass is no longer pending'), findsOneWidget);
   });
 
-  // Station and rules ------------------------------------------------------
 
   testWidgets('the station tab reports operation, not configuration', (
     tester,
@@ -276,10 +267,8 @@ void main() {
     expect(find.text('Online'), findsOneWidget);
     expect(find.text('Up to date'), findsOneWidget);
 
-    // Hardware settings belong to the Root surface in V15.
     expect(find.textContaining('/dev/tty'), findsNothing);
     expect(find.textContaining('rtlsdr'), findsNothing);
-    // No internal infrastructure is named (client-spec section 4).
     for (final word in ['gRPC', 'Redis', 'Mongo', 'Postgres', 'container']) {
       expect(find.textContaining(word), findsNothing, reason: word);
     }
@@ -316,7 +305,6 @@ void main() {
     expect(find.textContaining('cannot be scheduled'), findsOneWidget);
   });
 
-  // Orbital data -----------------------------------------------------------
 
   testWidgets('current orbital data is summarized', (tester) async {
     await openAdminTab(tester, stationAs('admin'), 'Orbital data');
@@ -328,8 +316,6 @@ void main() {
     expect(find.text('Refresh all'), findsOneWidget);
   });
 
-  // Stale data and absent data are different problems and must read
-  // differently.
   testWidgets('stale and missing orbital data are distinguished', (
     tester,
   ) async {
@@ -370,8 +356,6 @@ void main() {
     );
   });
 
-  // A provider outage keeps the previous data, and the wording has to say so
-  // rather than reporting a plain failure (spec.md section 11.1).
   testWidgets('a refresh reports what it kept', (tester) async {
     final server = stationAs('admin');
     server.responses['api/satellites/refresh-tles'] = {
@@ -388,7 +372,6 @@ void main() {
     expect(find.textContaining('1 kept their last known good'), findsOneWidget);
   });
 
-  // History ----------------------------------------------------------------
 
   testWidgets('history lists every pass on the station', (tester) async {
     final server = stationAs('admin');
@@ -400,8 +383,6 @@ void main() {
     };
     await openAdminTab(tester, server, 'History');
 
-    // Two rows, each carrying its own outcome. The same words also appear as
-    // filter chips, so the rows are counted rather than the words.
     expect(find.widgetWithText(Card, 'ISS (ZARYA)'), findsNWidgets(2));
     expect(find.byType(StatusChip), findsNWidgets(2));
   });
@@ -424,7 +405,6 @@ void main() {
     expect(find.byType(StatusChip), findsOneWidget);
   });
 
-  // Pass review ------------------------------------------------------------
 
   testWidgets('an admin can decide from the pass page', (tester) async {
     final server = stationAs('admin');
@@ -455,7 +435,6 @@ void main() {
     );
   });
 
-  // The same page for a normal user must offer no decision at all.
   testWidgets('a normal user gets no decision controls', (tester) async {
     final server = stationAs('user');
     server.responses['api/passes?scope=mine'] = {

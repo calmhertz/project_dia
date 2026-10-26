@@ -1,9 +1,3 @@
-// Package passplan turns an approved pass into the self-contained instruction
-// the Worker executes.
-//
-// The Worker may be running through a Server outage when the pass comes up, so
-// a plan must carry everything execution needs and nothing that would require
-// a call back (spec.md section 13.2).
 package passplan
 
 import (
@@ -23,45 +17,27 @@ import (
 	"aagasa/internal/store"
 )
 
-// PlanVersion is the schema version stamped into every plan. Raise it when a
-// change would make an older Worker misread a plan.
 const PlanVersion = 1
 
-// TrackStep is the spacing of the pointing timeline.
-//
-// Five seconds keeps a low-Earth-orbit pass to roughly a hundred points while
-// staying well inside the one-degree pointing accuracy a G-550 can hold.
 const TrackStep = 5 * time.Second
 
-// ErrNotApproved means the pass is not in a state that can be executed.
 var ErrNotApproved = errors.New("only an approved pass has an executable plan")
 
-// ErrStationNotConfigured means the station is missing a setting the plan
-// needs. It is an operator's job to fix, not a fault, so callers report it as
-// such rather than as an internal error.
 var ErrStationNotConfigured = errors.New("the station is not fully configured")
 
-// Predictor supplies the pointing timeline.
 type Predictor interface {
 	PredictPasses(ctx context.Context, request prediction.Request) (prediction.Result, error)
 }
 
-// Generator builds plans.
 type Generator struct {
 	repo      *store.Repository
 	predictor Predictor
 }
 
-// NewGenerator builds a plan generator.
 func NewGenerator(repo *store.Repository, predictor Predictor) *Generator {
 	return &Generator{repo: repo, predictor: predictor}
 }
 
-// Generate builds the executable plan for a pass.
-//
-// It is deterministic: the same pass, elements, station and configuration
-// always produce the same generation hash, so an unchanged plan is
-// recognisable without comparing it field by field.
 func (g *Generator) Generate(ctx context.Context, pass domain.Pass) (*workerv1.PassPlan, error) {
 	if pass.Status != domain.PassApproved {
 		return nil, fmt.Errorf("%w: pass is %s", ErrNotApproved, pass.Status)
@@ -75,8 +51,6 @@ func (g *Generator) Generate(ctx context.Context, pass domain.Pass) (*workerv1.P
 	if err != nil {
 		return nil, fmt.Errorf("load station: %w", err)
 	}
-	// The plan is built from the TLE the pass was planned with, not the
-	// newest one, so a later refresh cannot alter an existing plan.
 	elements, err := g.repo.GetTLERecordByID(ctx, pass.TLERecordID)
 	if err != nil {
 		return nil, fmt.Errorf("load orbital data: %w", err)
@@ -120,8 +94,6 @@ func (g *Generator) Generate(ctx context.Context, pass domain.Pass) (*workerv1.P
 		Los:                 timestamppb.New(pass.LOSAt.UTC()),
 		MaxElevationDegrees: pass.MaxElevationDegrees,
 
-		// Recording margins, not the scheduling buffers: the Worker has no
-		// business knowing how the Server reserves the station.
 		RecordingStart: timestamppb.New(pass.AOSAt.Add(-pass.RecordingPreRoll).UTC()),
 		RecordingEnd:   timestamppb.New(pass.LOSAt.Add(pass.RecordingPostRoll).UTC()),
 
@@ -143,16 +115,12 @@ func (g *Generator) Generate(ctx context.Context, pass domain.Pass) (*workerv1.P
 	return plan, nil
 }
 
-// GenerateAndStore builds a plan and persists it, reporting whether the stored
-// plan changed.
 func (g *Generator) GenerateAndStore(ctx context.Context, pass domain.Pass) (*workerv1.PassPlan, bool, error) {
 	plan, err := g.Generate(ctx, pass)
 	if err != nil {
 		return nil, false, err
 	}
 
-	// generated_at is stamped at store time and deliberately excluded from the
-	// generation hash, so regenerating an unchanged plan stays a no-op.
 	plan.GeneratedAt = timestamppb.New(time.Now().UTC())
 
 	encoded, err := Marshal(plan)
@@ -173,7 +141,6 @@ func (g *Generator) GenerateAndStore(ctx context.Context, pass domain.Pass) (*wo
 	return plan, changed, nil
 }
 
-// trackFor computes the pointing timeline for the pass window.
 func (g *Generator) trackFor(ctx context.Context, station domain.Station,
 	pass domain.Pass, elements domain.TLERecord) ([]*workerv1.TrackPoint, error) {
 	config, err := g.repo.GetSchedulingConfigByID(ctx, pass.SchedulingConfigID)
@@ -181,7 +148,6 @@ func (g *Generator) trackFor(ctx context.Context, station domain.Station,
 		return nil, fmt.Errorf("load scheduling config: %w", err)
 	}
 
-	// Bracket the pass so the predictor returns it whole, then match on AOS.
 	result, err := g.predictor.PredictPasses(ctx, prediction.Request{
 		Line1:                   elements.Line1,
 		Line2:                   elements.Line2,
@@ -217,15 +183,9 @@ func (g *Generator) trackFor(ctx context.Context, station domain.Station,
 		return points, nil
 	}
 
-	// A plan with no pointing timeline would leave the antenna still, so this
-	// is a failure rather than an empty track.
 	return nil, fmt.Errorf("no predicted pass matches the stored pass window")
 }
 
-// radioFor resolves the radio settings for the pass's band.
-//
-// A pass may override the station defaults through its radio_settings; those
-// values win, and anything absent falls back to the station's band config.
 func (g *Generator) radioFor(ctx context.Context, station domain.Station,
 	pass domain.Pass) (*workerv1.RadioSettings, error) {
 	configs, err := g.repo.GetStationBandConfigs(ctx, station.ID)
@@ -265,7 +225,6 @@ func (g *Generator) radioFor(ctx context.Context, station domain.Station,
 	return radio, nil
 }
 
-// applyRadioOverrides layers per-pass values over the station defaults.
 func applyRadioOverrides(radio *workerv1.RadioSettings, overrides map[string]any) {
 	if value, ok := numeric(overrides["frequency_hz"]); ok {
 		radio.FrequencyHz = int64(value)
@@ -300,10 +259,8 @@ func numeric(value any) (float64, bool) {
 	}
 }
 
-// pipelineFor resolves the SatDump pipeline, inlining a custom definition.
 func (g *Generator) pipelineFor(ctx context.Context, pass domain.Pass) (*workerv1.SatDumpPipeline, error) {
 	if pass.PipelineID == nil {
-		// No pipeline is valid for a raw baseband recording.
 		return &workerv1.SatDumpPipeline{}, nil
 	}
 
@@ -317,19 +274,12 @@ func (g *Generator) pipelineFor(ctx context.Context, pass domain.Pass) (*workerv
 		IsCustom:       pipeline.IsCustom,
 		ChecksumSha256: pipeline.ChecksumSHA256,
 	}
-	// A custom definition travels with the plan; the Worker cannot fetch it
-	// mid-pass if the Server is unreachable.
 	if pipeline.IsCustom {
 		out.DefinitionJson = pipeline.Definition
 	}
 	return out, nil
 }
 
-// Generation is the content hash of a plan, excluding generated_at.
-//
-// Deterministic protobuf marshalling is not a canonical form across versions,
-// so the hash is taken over a copy with the timestamp and any existing
-// generation cleared.
 func Generation(plan *workerv1.PassPlan) (string, error) {
 	copied, ok := proto.Clone(plan).(*workerv1.PassPlan)
 	if !ok {
@@ -346,7 +296,6 @@ func Generation(plan *workerv1.PassPlan) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// Marshal serializes a plan for storage or transmission.
 func Marshal(plan *workerv1.PassPlan) ([]byte, error) {
 	encoded, err := proto.MarshalOptions{Deterministic: true}.Marshal(plan)
 	if err != nil {
@@ -355,7 +304,6 @@ func Marshal(plan *workerv1.PassPlan) ([]byte, error) {
 	return encoded, nil
 }
 
-// Unmarshal decodes a stored plan.
 func Unmarshal(encoded []byte) (*workerv1.PassPlan, error) {
 	var plan workerv1.PassPlan
 	if err := proto.Unmarshal(encoded, &plan); err != nil {
@@ -364,8 +312,6 @@ func Unmarshal(encoded []byte) (*workerv1.PassPlan, error) {
 	return &plan, nil
 }
 
-// SetGeneration hashes the member plans into one value describing a whole
-// desired state (spec.md section 6.2).
 func SetGeneration(plans []*workerv1.PassPlan) string {
 	hash := sha256.New()
 	for _, plan := range plans {

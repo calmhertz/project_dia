@@ -1,16 +1,4 @@
 #!/usr/bin/env bash
-# Aagasa V1 acceptance (plan.md V19).
-#
-#   AAGASA_ENV_NAME=accept AAGASA_PORT_OFFSET=200 scripts/dev-env.sh up
-#   AAGASA_PORT_OFFSET=200 scripts/acceptance.sh
-#
-# Runs the seven critical scenarios from plan.md against a live deployment.
-# It stops and starts the Server and the Worker, so give it an environment of
-# its own rather than one someone is using.
-#
-# Steps that need a satellite to actually fly overhead are reported as
-# DEFERRED rather than passed: a pass cannot be arranged on demand, and
-# claiming otherwise would be the one thing an acceptance run must not do.
 
 set -uo pipefail
 
@@ -87,7 +75,6 @@ wait_for_server() {
 
 env_do() { AAGASA_ENV_NAME="$NAME" AAGASA_PORT_OFFSET="$OFFSET" "$ROOT/scripts/dev-env.sh" "$@" >/dev/null 2>&1; }
 
-# Sign in --------------------------------------------------------------------
 
 ROOT_TOKEN="$(login root "$ROOT_PASSWORD")"
 OPERATOR="$(login operator "$OPERATOR_PASSWORD")"
@@ -98,7 +85,6 @@ APPROVER="$(login approver "$APPROVER_PASSWORD")"
 SATELLITE="$(api GET /api/satellites "$OPERATOR" | json satellites.0.id)"
 [ -n "$SATELLITE" ] || { printf 'acceptance: the catalogue is empty\n' >&2; exit 1; }
 
-# next_pass SATELLITE INDEX - the AOS of an upcoming predicted pass.
 next_pass() {
     api GET "/api/satellites/$1/passes?hours=72" "$OPERATOR" | python3 -c "
 import json,sys
@@ -114,11 +100,6 @@ request_pass() {
         "{\"satellite_id\":\"$satellite\",\"aos\":\"$aos\",\"band\":\"vhf\",\"recording_mode\":\"raw\",\"visibility\":\"$visibility\",\"override\":$override}"
 }
 
-# A known starting point ------------------------------------------------------
-#
-# An acceptance run must be repeatable, and passes from a previous run still
-# hold their windows. Cancelling rather than deleting: the station's history
-# is never destroyed, so the record of earlier runs stays (spec.md section 13).
 
 scenario "Prepare"
 
@@ -135,8 +116,6 @@ for entry in json.load(sys.stdin).get('passes', []):
 done
 pass "cleared $CLEARED pass(es) left by an earlier run"
 
-# Scenario B - normal operation ----------------------------------------------
-# Run first: the later scenarios need a pass to exist.
 
 scenario "B  Normal operation"
 
@@ -149,7 +128,6 @@ PASS_ONE="$(printf '%s' "$FIRST" | json pass.id)"
 [ -n "$PASS_ONE" ] && pass "a user requested a pass" \
     || { fail "the request was refused: $(printf '%s' "$FIRST" | json message)"; exit 1; }
 
-# The same window, a different user: the station cannot serve both.
 CONFLICT="$(request_pass "$APPROVER" "$SATELLITE" "$AOS_ONE")"
 if [ "$(printf '%s' "$CONFLICT" | json error)" = "station_conflict" ]; then
     pass "a conflicting window is refused"
@@ -185,7 +163,6 @@ done
 deferred "the station executes and the recording is stored on the Server"
 note "needs the pass window itself; see the execution note at the end"
 
-# Scenario D - root override -------------------------------------------------
 
 scenario "D  Root override"
 
@@ -207,7 +184,6 @@ else
     fail "the override was refused: $(printf '%s' "$OVERRIDE" | json message)"
 fi
 
-# Scenario E - public and private --------------------------------------------
 
 scenario "E  Public and private"
 
@@ -231,7 +207,6 @@ fi
 deferred "downloading a public recording"
 note "needs a completed pass; the authorization is covered by the Go tests"
 
-# Scenario C - worker offline ------------------------------------------------
 
 scenario "C  Worker offline"
 
@@ -260,7 +235,6 @@ else
     fail "the station did not come back"
 fi
 
-# Scenario A - server offline ------------------------------------------------
 
 scenario "A  Server offline"
 
@@ -269,7 +243,6 @@ pkill -x aagasa-server >/dev/null 2>&1
 sleep 3
 [ "$(code_of GET /health)" != "200" ] && pass "the Server is down" || fail "the Server survived being stopped"
 
-# The Worker must still be running with its schedule.
 AAGASA_ENV_NAME="$NAME" AAGASA_PORT_OFFSET="$OFFSET" AAGASA_HARDWARE=simulated \
     "$ROOT/scripts/dev-env.sh" up >/dev/null 2>&1 &
 UP_PID=$!
@@ -291,8 +264,6 @@ if wait_for_worker online 90; then
 else
     fail "the station did not reconnect"
 fi
-# Convergence means the Server agrees the station holds the current desired
-# state, which is a fact it reports rather than something to infer from logs.
 APPROVER="$(login approver "$APPROVER_PASSWORD")"
 CONVERGED=""
 for _ in $(seq 1 20); do
@@ -305,13 +276,11 @@ done
 deferred "a recording captured during the outage uploads on reconnect"
 note "proven live in V12; needs a pass window to repeat here"
 
-# Scenario F - TLE provider failure -------------------------------------------
 
 scenario "F  Orbital data provider failure"
 
 BEFORE_EPOCH="$(api GET /api/tle-status "$APPROVER" | json satellites.0.epoch)"
 
-# Point the Server at providers that cannot answer, and ask it to refresh.
 env_do down >/dev/null 2>&1
 AAGASA_CELESTRAK_URL="http://127.0.0.1:1/gp.php" \
 AAGASA_SATNOGS_URL="http://127.0.0.1:1/api/tle" \
@@ -336,12 +305,10 @@ else
     fail "the Server did not start with unreachable providers configured"
 fi
 
-# Put the real providers back.
 env_do down >/dev/null 2>&1
 AAGASA_ENV_NAME="$NAME" AAGASA_PORT_OFFSET="$OFFSET" "$ROOT/scripts/dev-env.sh" up >/dev/null 2>&1
 wait_for_server && pass "the Server runs again with real providers" || fail "the Server did not restart"
 
-# Scenario G - storage pressure -----------------------------------------------
 
 scenario "G  Storage pressure"
 
@@ -350,7 +317,6 @@ note "filling a real disk is not something an acceptance run should do; the"
 note "retention rule, the twelve-hour floor and the pressure threshold are"
 note "covered by the Worker's own tests (worker/tests/test_recordings.py)"
 
-# Summary ---------------------------------------------------------------------
 
 printf '\n%s\n' "========================================="
 printf 'passed %d, failed %d, deferred %d\n' "$PASSED" "$FAILED" "$DEFERRED"

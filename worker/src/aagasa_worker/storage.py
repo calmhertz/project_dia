@@ -11,8 +11,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Local state may contain the Worker credential's effects and pass data, so it
-# is not world-readable.
 STATE_DIR_MODE = 0o700
 
 

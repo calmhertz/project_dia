@@ -64,7 +64,6 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	created, err := s.repo.CreateUser(r.Context(), domain.User{
 		Username: username, PasswordHash: hash, Role: role,
-		// A new account changes its password on first login.
 		MustChangePassword: true,
 	})
 	if err != nil {
@@ -156,7 +155,6 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// pathUUID reads and validates the {id} path segment.
 func (s *Server) pathUUID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {

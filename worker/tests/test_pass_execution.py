@@ -179,8 +179,6 @@ def run_pass(station, tmp_path, plan, clock=None, stop=None):
     stop = stop or threading.Event()
 
     def sleeper(seconds, stop_event):
-        # Advance the clock instead of waiting, with a token real pause so a
-        # spawned capture process actually gets scheduled.
         clock.now = clock.now + timedelta(seconds=seconds)
         time.sleep(0.02)
 
@@ -189,7 +187,6 @@ def run_pass(station, tmp_path, plan, clock=None, stop=None):
     return handler.execute(stored_from(plan), stop), clock
 
 
-# The full sequence ---------------------------------------------------------
 
 def test_a_complete_pass_runs_the_whole_sequence(station_parts, tmp_path):
     station, writes = station_parts()
@@ -199,15 +196,12 @@ def test_a_complete_pass_runs_the_whole_sequence(station_parts, tmp_path):
 
     assert outcome.succeeded is True, outcome.detail
 
-    # Pre-positioned before the pass, then tracked, then parked.
     assert writes[0] == b"W0180 010\r", "antenna was not pre-positioned at the first track point"
     assert writes[-1] == b"W0180 005\r", "antenna was not parked afterwards"
-    # Every command is a well-formed G-550 instruction.
     for payload in writes:
         assert payload.startswith(b"W") and payload.endswith(b"\r")
         assert len(payload) == len(b"W0000 000\r")
 
-    # A capture directory with content was produced.
     output = tmp_path / "recordings" / "pass-1"
     assert output.is_dir()
     assert (output / "capture.bin").exists()
@@ -221,7 +215,6 @@ def test_the_antenna_follows_the_track(station_parts, tmp_path):
 
     run_pass(station, tmp_path, plan)
 
-    # The park command is last; the rest are the track.
     tracked = writes[:-1]
     assert len(tracked) == 6
     azimuths = [int(payload[1:5]) for payload in tracked]
@@ -230,23 +223,19 @@ def test_the_antenna_follows_the_track(station_parts, tmp_path):
     assert elevations == [10, 15, 20, 25, 30, 35]
 
 
-# Redundant serial writes at a rotator are worth avoiding.
 def test_negligible_pointing_changes_are_skipped(station_parts, tmp_path):
     station, writes = station_parts()
     plan = build_plan(track_points=4)
-    # Flatten the track so consecutive points barely differ.
     for point in plan.track:
         point.azimuth_degrees = 180.0
         point.elevation_degrees = 10.0
 
     run_pass(station, tmp_path, plan)
 
-    # One pre-position plus the park, with the identical points skipped.
     assert len(writes) == 2
     assert MIN_POINTING_CHANGE_DEGREES > 0
 
 
-# Capture command ----------------------------------------------------------
 
 def test_process_mode_runs_a_live_decode(station_parts, tmp_path):
     station, _ = station_parts()
@@ -269,7 +258,6 @@ def test_process_mode_runs_a_live_decode(station_parts, tmp_path):
     assert command[command.index("--samplerate") + 1] == "2048000"
     assert "--bias" in command
     assert command[command.index("--ppm_correction") + 1] == "3"
-    # SatDump bounds its own run, so a Worker crash cannot leave it going.
     assert "--timeout" in command
 
 
@@ -288,7 +276,6 @@ def test_raw_mode_records_baseband(station_parts, tmp_path):
     assert command[command.index("--baseband_format") + 1] == "ziq"
 
 
-# One RTL-SDR cannot feed two SatDump processes.
 def test_raw_and_process_reports_the_shortfall(station_parts, tmp_path):
     station, _ = station_parts()
     plan = build_plan(mode=passplan_pb2.RECORDING_MODE_RAW_AND_PROCESS)
@@ -299,7 +286,6 @@ def test_raw_and_process_reports_the_shortfall(station_parts, tmp_path):
     assert "raw_and_process ran as live decode only" in outcome.detail
 
 
-# Refusals -----------------------------------------------------------------
 
 def test_a_plan_with_no_track_is_refused(station_parts, tmp_path):
     station, writes = station_parts()
@@ -309,7 +295,6 @@ def test_a_plan_with_no_track_is_refused(station_parts, tmp_path):
 
     assert outcome.succeeded is False
     assert "no pointing timeline" in outcome.detail
-    # Nothing was commanded except the safety park.
     assert all(payload == b"W0180 005\r" for payload in writes)
 
 
@@ -360,9 +345,7 @@ def test_a_corrupt_plan_is_refused(station_parts, tmp_path):
     assert "unreadable" in outcome.detail
 
 
-# Hardware faults ----------------------------------------------------------
 
-# Without SatDump there is nothing to capture with, so do not slew the antenna.
 def test_missing_satdump_fails_the_pass_before_moving(station_parts, tmp_path):
     station, writes = station_parts(satdump_body="import sys\n")
     station.satdump._binary = "satdump-does-not-exist"  # noqa: SLF001
@@ -374,7 +357,6 @@ def test_missing_satdump_fails_the_pass_before_moving(station_parts, tmp_path):
     assert "satdump unavailable" in outcome.detail
 
 
-# A recording made with a stuck antenna is still worth keeping.
 def test_a_broken_rotator_does_not_by_itself_fail_the_pass(station_parts, tmp_path):
     station, _ = station_parts(rotator_fails=True)
     plan = build_plan()
@@ -419,24 +401,21 @@ def test_a_capture_that_will_not_start_fails_the_pass(station_parts, tmp_path):
     assert "capture did not start" in outcome.detail
 
 
-# Shutdown -----------------------------------------------------------------
 
 def test_shutdown_during_a_pass_stops_cleanly(station_parts, tmp_path):
     station, writes = station_parts()
     plan = build_plan()
     stop = threading.Event()
-    stop.set()  # already shutting down
+    stop.set()
 
     outcome, _ = run_pass(station, tmp_path, plan, stop=stop)
 
     assert outcome.succeeded is False
     assert "shutting down" in outcome.detail
     assert station.capture_active is False
-    # The antenna is still parked on the way out.
     assert writes[-1] == b"W0180 005\r"
 
 
-# Whatever goes wrong, the station must end up safe.
 def test_the_station_is_always_left_safe(station_parts, tmp_path):
     for kwargs in ({}, {"rotator_fails": False}, {"sdr_present": False}):
         station, writes = station_parts(**kwargs)
@@ -449,11 +428,6 @@ def test_the_station_is_always_left_safe(station_parts, tmp_path):
             assert writes[-1] == b"W0180 005\r", "the antenna was not parked"
 
 
-# Disk pressure -------------------------------------------------------------
-#
-# Filling the disk mid-pass loses the recording anyway and endangers the ones
-# already waiting to upload (spec.md section 19.2), so a pass the disk cannot
-# hold is refused before the antenna moves.
 
 def test_a_pass_the_disk_cannot_hold_is_refused(station_parts, tmp_path, monkeypatch):
     station, writes = station_parts()
@@ -465,10 +439,7 @@ def test_a_pass_the_disk_cannot_hold_is_refused(station_parts, tmp_path, monkeyp
 
     assert outcome.succeeded is False
     assert "not enough disk space" in outcome.detail
-    # It says both numbers, or an operator cannot tell how short they are.
     assert "MiB" in outcome.detail
-    # Nothing was captured, and the antenna never slewed to the pass: the one
-    # command is the park that always follows, leaving the station safe.
     assert not (tmp_path / "recordings" / "pass-1").exists()
     assert writes == [b"W0180 005\r"]
 
@@ -484,7 +455,6 @@ def test_a_pass_that_fits_is_not_refused(station_parts, tmp_path, monkeypatch):
     assert outcome.succeeded is True, outcome.detail
 
 
-# An unmeasurable disk must not block a pass that might have been fine.
 def test_an_unreadable_disk_does_not_refuse_the_pass(station_parts, tmp_path, monkeypatch):
     station, _ = station_parts()
     plan = build_plan()

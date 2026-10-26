@@ -1,17 +1,4 @@
 #!/usr/bin/env bash
-# End-to-end test against a running Aagasa environment (plan.md V17).
-#
-#   AAGASA_ENV_NAME=test AAGASA_PORT_OFFSET=100 scripts/dev-env.sh up
-#   AAGASA_PORT_OFFSET=100 scripts/integration-test.sh
-#
-# It drives the REST API as the three roles do and checks the whole control
-# plane: sign-in, the catalogue, prediction, requesting, approving, plan
-# generation and the station receiving the plan. No hardware is required.
-#
-# Execution itself is not asserted here: when a satellite next flies over is
-# not something a test can arrange, and waiting hours is not a test. Run
-# scripts/failure-drills.sh for recovery behaviour, and see docs/hardware.md
-# for the hardware-integration path.
 
 set -uo pipefail
 
@@ -28,7 +15,6 @@ say()  { printf '\n== %s\n' "$1"; }
 pass() { printf '  PASS  %s\n' "$1"; PASSED=$((PASSED + 1)); }
 fail() { printf '  FAIL  %s\n' "$1"; FAILED=$((FAILED + 1)); }
 
-# json FIELD - read a top-level field from stdin without needing jq.
 json() {
     python3 -c "
 import json,sys
@@ -67,7 +53,6 @@ login() {
     api POST /api/auth/login "" "{\"username\":\"$1\",\"password\":\"$2\"}" | json token
 }
 
-# Sign in --------------------------------------------------------------------
 
 say "Sign in"
 ROOT_TOKEN="$(login root "$ROOT_PASSWORD")"
@@ -78,7 +63,6 @@ APPROVER_TOKEN="$(login approver "$APPROVER_PASSWORD")"
 [ -n "$OPERATOR_TOKEN" ] && pass "operator" || fail "operator could not sign in"
 [ -n "$APPROVER_TOKEN" ] && pass "approver" || fail "approver could not sign in"
 
-# Roles ----------------------------------------------------------------------
 
 say "Roles"
 [ "$(status_of GET /api/station/config "$OPERATOR_TOKEN")" = "403" ] \
@@ -92,7 +76,6 @@ say "Roles"
 [ "$(status_of GET /api/audit "$APPROVER_TOKEN")" = "403" ] \
     && pass "an admin cannot read the audit trail" || fail "an admin read the audit trail"
 
-# The station ----------------------------------------------------------------
 
 say "Station"
 WORKERS="$(api GET /api/workers "$APPROVER_TOKEN")"
@@ -107,7 +90,6 @@ PIPELINE_COUNT="$(printf '%s' "$PIPELINES" | python3 -c 'import json,sys; print(
     && pass "the station reported $PIPELINE_COUNT pipelines" \
     || fail "no pipelines were reported"
 
-# The catalogue and prediction -----------------------------------------------
 
 say "Catalogue and prediction"
 SATELLITES="$(api GET /api/satellites "$OPERATOR_TOKEN")"
@@ -120,7 +102,6 @@ AOS="$(printf '%s' "$PREDICTION" | json passes.0.aos)"
     && pass "a pass was predicted at $AOS" \
     || { fail "no pass was predicted in the next 48 hours"; exit 1; }
 
-# Requesting and approving ---------------------------------------------------
 
 say "Requesting"
 REQUEST="{\"satellite_id\":\"$SATELLITE_ID\",\"aos\":\"$AOS\",\"band\":\"vhf\",\"recording_mode\":\"raw\",\"visibility\":\"private\"}"
@@ -138,7 +119,6 @@ pass "a pass was requested"
     && pass "it is waiting for a decision" \
     || fail "status = $PASS_STATUS, want pending_approval"
 
-# A decode without a pipeline must be refused, not quietly downgraded.
 NO_PIPELINE="{\"satellite_id\":\"$SATELLITE_ID\",\"aos\":\"$AOS\",\"band\":\"vhf\",\"recording_mode\":\"process\",\"visibility\":\"private\"}"
 [ "$(status_of POST /api/passes "$OPERATOR_TOKEN" "$NO_PIPELINE")" = "400" ] \
     && pass "a decode without a pipeline is refused" \
@@ -154,7 +134,6 @@ APPROVED="$(api POST "/api/passes/$PASS_ID/approve" "$APPROVER_TOKEN")"
     && pass "an admin approved it" \
     || fail "approval failed: $(printf '%s' "$APPROVED" | json message)"
 
-# The executable plan --------------------------------------------------------
 
 say "Plan"
 PLAN="$(api GET "/api/passes/$PASS_ID/plan" "$APPROVER_TOKEN")"
@@ -168,7 +147,6 @@ FREQUENCY="$(printf '%s' "$PLAN" | json radio.frequency_hz)"
     || fail "frequency = $FREQUENCY"
 
 say "Synchronization"
-# The station polls; give it a heartbeat interval or two to collect the plan.
 SYNCED=""
 for _ in $(seq 1 15); do
     WORKERS="$(api GET /api/workers "$APPROVER_TOKEN")"
@@ -182,7 +160,6 @@ done
     && pass "the station reports itself in sync with the new plan" \
     || fail "the station did not take the plan within 30s"
 
-# Visibility -----------------------------------------------------------------
 
 say "Visibility"
 [ "$(status_of GET "/api/passes/$PASS_ID" "$APPROVER_TOKEN")" = "200" ] \
@@ -190,7 +167,6 @@ say "Visibility"
 [ "$(status_of GET /api/passes?scope=all "$OPERATOR_TOKEN")" = "403" ] \
     && pass "an operator cannot list every pass" || fail "an operator listed every pass"
 
-# Tidy up so the run is repeatable ------------------------------------------
 
 say "Cleanup"
 CANCELLED="$(api POST "/api/passes/$PASS_ID/cancel" "$OPERATOR_TOKEN")"

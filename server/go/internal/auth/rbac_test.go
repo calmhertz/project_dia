@@ -25,7 +25,6 @@ func TestAuthorityOrdering(t *testing.T) {
 	}
 }
 
-// A normal user must not reach administrative operations.
 func TestNormalUserCannotAdminister(t *testing.T) {
 	user := userWith(domain.RoleUser)
 
@@ -43,7 +42,6 @@ func TestNormalUserCannotAdminister(t *testing.T) {
 	}
 }
 
-// Admin sits below Root and must not reach Root-only operations.
 func TestAdminCannotPerformRootOnlyOperations(t *testing.T) {
 	admin := userWith(domain.RoleAdmin)
 	target := userWith(domain.RoleUser)
@@ -63,7 +61,6 @@ func TestAdminCannotPerformRootOnlyOperations(t *testing.T) {
 	if CanCreateUserWithRole(admin, domain.RoleAdmin) {
 		t.Error("an admin can create other admins")
 	}
-	// An admin may still do its own job.
 	if !CanApprovePasses(admin) {
 		t.Error("an admin cannot approve passes")
 	}
@@ -72,7 +69,6 @@ func TestAdminCannotPerformRootOnlyOperations(t *testing.T) {
 	}
 }
 
-// spec.md section 17.1: Root cannot be demoted or deleted, by anyone.
 func TestRootCannotBeDemotedOrDeleted(t *testing.T) {
 	root := userWith(domain.RoleRoot)
 	otherRoot := userWith(domain.RoleRoot)
@@ -90,7 +86,6 @@ func TestRootCannotBeDemotedOrDeleted(t *testing.T) {
 	}
 }
 
-// There is exactly one Root; nobody may mint a second.
 func TestNobodyCanCreateOrPromoteToRoot(t *testing.T) {
 	root := userWith(domain.RoleRoot)
 	target := userWith(domain.RoleUser)

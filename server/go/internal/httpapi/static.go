@@ -9,9 +9,6 @@ import (
 	"strings"
 )
 
-// registerStatic wires the web client into the mux when a build is present.
-// A missing directory is a valid API-only deployment, so it is a warning
-// rather than a startup failure.
 func registerStatic(mux *http.ServeMux, logger *slog.Logger, root string) {
 	if root == "" {
 		return
@@ -25,16 +22,6 @@ func registerStatic(mux *http.ServeMux, logger *slog.Logger, root string) {
 	logger.Info("serving web client", slog.String("dir", root))
 }
 
-// staticHandler serves the built Flutter web client from root.
-//
-// The Client is same-origin with the API in a normal deployment: opening the
-// Server's HTTP address shows the UI, and the UI calls /api on that same
-// origin. Paths under /api that did not match a route stay API 404s instead of
-// falling through to index.html, so a typo in a request is never answered with
-// a page.
-//
-// Flutter's router is hash-based by default, but serving index.html for any
-// unknown path keeps deep links working if it is switched to path URLs.
 func staticHandler(root string) http.Handler {
 	fileServer := http.FileServer(http.Dir(root))
 	indexPath := filepath.Join(root, "index.html")
@@ -45,13 +32,9 @@ func staticHandler(root string) http.Handler {
 			return
 		}
 
-		// path.Clean on a rooted path removes "..", so the joined path can
-		// never escape root.
 		requested := filepath.Join(root, filepath.FromSlash(path.Clean("/"+r.URL.Path)))
 		info, err := os.Stat(requested)
 		if err != nil || info.IsDir() {
-			// The shell and the service worker are updated on every deploy;
-			// caching either would leave browsers on an old build.
 			if isUncachedPath(r.URL.Path) {
 				w.Header().Set("Cache-Control", "no-cache")
 			}

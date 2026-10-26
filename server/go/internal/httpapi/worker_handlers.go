@@ -16,19 +16,12 @@ type workerView struct {
 	WorkerVersion   string     `json:"worker_version,omitempty"`
 	LastSeenAt      *time.Time `json:"last_seen_at,omitempty"`
 	LastSyncAt      *time.Time `json:"last_sync_at,omitempty"`
-	// True when the Worker has confirmed it holds the current desired state.
 	InSync bool `json:"in_sync"`
-	// What the Worker is still carrying, which grows during an outage.
 	PendingUploads int `json:"pending_uploads"`
 	PendingReports int `json:"pending_reports"`
-	// Seconds since the last heartbeat, so a stale entry is obvious.
 	SecondsSinceSeen *float64 `json:"seconds_since_seen,omitempty"`
 }
 
-// handleListWorkers reports station reachability.
-//
-// Operational information for Admin and Root; a normal user sees station
-// availability through scheduling instead (client-spec section 4).
 func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 	workers, err := s.repo.ListWorkers(r.Context())
 	if err != nil {
@@ -60,7 +53,6 @@ func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(s.logger, w, http.StatusOK, map[string]any{
 		"workers": views,
-		// Stated so an operator can read the timing without the source.
 		"heartbeat_interval_seconds": int(workerapi.HeartbeatInterval.Seconds()),
 		"offline_after_seconds":      int(workerapi.StaleAfter.Seconds()),
 	})

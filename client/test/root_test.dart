@@ -4,7 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'support.dart';
 
-/// An initialized station signed in as [role].
 FakeServer configuredAs(String role) {
   final server = FakeServer();
   server.responses['api/auth/me'] = userJson(username: role, role: role);
@@ -123,10 +122,7 @@ Future<void> openRootTab(
 }
 
 void main() {
-  // First-run setup --------------------------------------------------------
 
-  // spec.md section 17.1: before setup the Server refuses almost everything.
-  // Root is sent to do it; nobody else is left guessing.
   testWidgets('root is sent to first-run setup', (tester) async {
     final server = configuredAs('root');
     server.responses['api/setup'] = {'initialized': false};
@@ -174,7 +170,6 @@ void main() {
       '77.7',
     );
 
-    // Setup then reports as done, which is what the Server would say.
     server.responses['api/setup'] = {
       'initialized': true,
       'initialized_at': '2026-08-25T10:00:00Z',
@@ -189,7 +184,6 @@ void main() {
     expect(find.text('Set up this station'), findsNothing);
   });
 
-  // The G-550's limits are real hardware limits (spec.md section 9).
   testWidgets('setup refuses an impossible park angle', (tester) async {
     final server = configuredAs('root');
     server.responses['api/setup'] = {'initialized': false};
@@ -252,9 +246,7 @@ void main() {
     expect(find.text('Complete setup'), findsOneWidget);
   });
 
-  // Who sees the root surface ----------------------------------------------
 
-  // client-spec section 30: an Admin must not see Root-only controls.
   testWidgets('an admin gets no configuration, accounts or audit tabs', (
     tester,
   ) async {
@@ -278,7 +270,6 @@ void main() {
     expect(find.text('Audit'), findsOneWidget);
   });
 
-  // Configuration ----------------------------------------------------------
 
   testWidgets('the configuration screen shows the whole station', (
     tester,
@@ -290,12 +281,10 @@ void main() {
     expect(find.text('UHF antenna'), findsOneWidget);
     expect(find.text('Rotator and receiver'), findsOneWidget);
     expect(find.text('Scheduling rules'), findsOneWidget);
-    // The hardware an Admin never sees is here, because Root owns it.
     expect(find.text('/dev/ttyUSB0'), findsOneWidget);
     expect(find.text('rtlsdr'), findsOneWidget);
   });
 
-  // client-spec section 29: Root is warned when scheduled work exists.
   testWidgets('scheduled work is flagged before anything is changed', (
     tester,
   ) async {
@@ -343,8 +332,6 @@ void main() {
     );
   });
 
-  // An out-of-range park angle must never reach the Server, let alone the
-  // rotator (spec.md section 9).
   testWidgets('an impossible park angle is refused locally', (tester) async {
     final server = configuredAs('root');
     await openRootTab(tester, server, 'Configuration');
@@ -375,7 +362,6 @@ void main() {
     };
     await openRootTab(tester, server, 'Configuration');
 
-    // The PUT answers with the effective time the Server chose.
     server.responses['api/scheduling-config'] = {
       ...server.responses['api/scheduling-config']!,
       'effective_from': '2026-08-25T10:10:00Z',
@@ -391,13 +377,11 @@ void main() {
     expect(find.textContaining('In force from'), findsOneWidget);
   });
 
-  // Accounts ---------------------------------------------------------------
 
   testWidgets('root can promote, and root itself is protected', (tester) async {
     final server = configuredAs('root');
     await openRootTab(tester, server, 'Accounts');
 
-    // The signed-in root account and the root role are both untouchable.
     expect(find.text('Protected'), findsWidgets);
 
     await tester.tap(
@@ -408,7 +392,6 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Promote to admin'), findsOneWidget);
-    // Nothing offers promotion to root (spec.md section 17.1).
     expect(find.text('Promote to root'), findsNothing);
 
     server.responses['api/users/user-2'] = userJson(
@@ -475,7 +458,6 @@ void main() {
     expect(server.seen.any((entry) => entry.startsWith('DELETE')), isFalse);
   });
 
-  // Audit ------------------------------------------------------------------
 
   testWidgets('the audit trail reads in words, not wire names', (tester) async {
     final server = configuredAs('root');
@@ -503,7 +485,6 @@ void main() {
 
     expect(find.text('Pass cancelled by root override'), findsWidgets);
     expect(find.text('Failed sign-in'), findsOneWidget);
-    // The actor is named where the account is known; user-1 is root here.
     expect(find.textContaining('root'), findsWidgets);
   });
 
@@ -531,7 +512,6 @@ void main() {
   catalogueTests();
   frequencyTests();
 
-  // An account with passes cannot be deleted, because the passes outlive it.
   testWidgets('a refused account deletion explains why', (tester) async {
     final server = configuredAs('root');
     server.failures['DELETE api/users/user-2'] = (
@@ -560,10 +540,6 @@ void main() {
   });
 }
 
-// The centre frequency ------------------------------------------------------
-//
-// A band without one produces no pass plan, so approval fails long after
-// setup looked successful. That is what a live station hit.
 
 void frequencyTests() {
   testWidgets('setup will not complete without a centre frequency', (
@@ -658,14 +634,10 @@ void frequencyTests() {
   });
 }
 
-// Catalogue administration ---------------------------------------------------
 
 void catalogueTests() {
-  // spec.md section 17.1: changing the catalogue is Root's.
   testWidgets('only root is offered a way to add a satellite', (tester) async {
     for (final entry in {'user': false, 'admin': false, 'root': true}.entries) {
-      // Unmount first: re-pumping AagasaApp alone would reuse the existing
-      // provider and keep the previous role signed in.
       await tester.pumpWidget(const SizedBox.shrink());
       final server = configuredAs(entry.key);
       await openAs(tester, server);
@@ -740,8 +712,6 @@ void catalogueTests() {
     );
   });
 
-  // A satellite the providers do not know cannot be tracked, so the Server
-  // stores nothing. The wording has to say which of the two it is.
   testWidgets('an unknown catalog number is explained', (tester) async {
     final server = configuredAs('root');
     server.failures['POST api/satellites'] = (
@@ -808,8 +778,6 @@ void catalogueTests() {
     );
   });
 
-  // spec.md section 13: history is never quietly dropped, so a satellite
-  // with passes cannot be removed. The refusal has to suggest the way out.
   testWidgets('removing a satellite with passes suggests closing it instead', (
     tester,
   ) async {
@@ -843,8 +811,6 @@ void catalogueTests() {
     );
   });
 
-  // There is no self-registration anywhere in the specs; the login screen
-  // says so rather than leaving someone hunting for a sign-up link.
   testWidgets('the login screen says how accounts are made', (tester) async {
     final built = buildSession(FakeServer());
     await tester.pumpWidget(AagasaApp(api: built.api, session: built.session));

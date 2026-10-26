@@ -6,7 +6,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'support.dart';
 
-/// Signs in and settles on the shell.
 Future<void> signIn(WidgetTester tester, FakeServer server) async {
   final built = buildSession(server);
   await tester.pumpWidget(AagasaApp(api: built.api, session: built.session));
@@ -35,7 +34,6 @@ FakeServer serverWithCatalogue() {
 }
 
 void main() {
-  // Theme -----------------------------------------------------------------
 
   testWidgets('the theme is dark and built from the V1 seed', (tester) async {
     final built = buildSession(FakeServer());
@@ -49,7 +47,6 @@ void main() {
     expect(AppTheme.seedColor, const Color(0xFF487CE5));
   });
 
-  // Sign in ---------------------------------------------------------------
 
   testWidgets('an unauthenticated visitor sees the login screen', (
     tester,
@@ -98,7 +95,6 @@ void main() {
     tester,
   ) async {
     final server = FakeServer();
-    // No login route registered, so the fake answers 404 for it.
     final built = buildSession(server);
     await tester.pumpWidget(AagasaApp(api: built.api, session: built.session));
     await tester.pumpAndSettle();
@@ -125,9 +121,7 @@ void main() {
     expect(server.seen.where((entry) => entry.contains('login')), isEmpty);
   });
 
-  // Forced password change -------------------------------------------------
 
-  // spec.md section 17.1: nothing else is reachable until it is done.
   testWidgets('a forced password change blocks the rest of the app', (
     tester,
   ) async {
@@ -178,7 +172,6 @@ void main() {
     expect(find.text('Use at least 12 characters'), findsOneWidget);
   });
 
-  // Session restore --------------------------------------------------------
 
   testWidgets('a stored session is restored without asking again', (
     tester,
@@ -192,7 +185,6 @@ void main() {
     expect(find.textContaining('Welcome back'), findsOneWidget);
   });
 
-  // A revoked token must not leave the user staring at errors.
   testWidgets('a rejected stored session returns to login', (tester) async {
     final server = FakeServer();
     server.failures['api/auth/me'] = (
@@ -212,7 +204,6 @@ void main() {
     );
   });
 
-  // Catalogue --------------------------------------------------------------
 
   testWidgets('the catalogue lists satellites', (tester) async {
     final server = serverWithCatalogue();
@@ -236,7 +227,6 @@ void main() {
     expect(find.text('No satellites yet'), findsOneWidget);
   });
 
-  // Missing metadata must never break the listing (spec.md section 11.2).
   testWidgets('a satellite without metadata still lists', (tester) async {
     final server = serverWithCatalogue();
     server.responses['api/satellites'] = {
@@ -250,7 +240,6 @@ void main() {
     expect(find.text('UNKNOWN-1'), findsOneWidget);
   });
 
-  // Passes -----------------------------------------------------------------
 
   testWidgets('my passes shows status for each pass', (tester) async {
     final server = serverWithCatalogue();
@@ -294,7 +283,6 @@ void main() {
     );
   });
 
-  // Layout -----------------------------------------------------------------
 
   testWidgets('a narrow viewport uses a navigation bar', (tester) async {
     tester.view.physicalSize = const Size(400, 900);
@@ -318,7 +306,6 @@ void main() {
     expect(find.byType(NavigationBar), findsNothing);
   });
 
-  // Sign out ---------------------------------------------------------------
 
   testWidgets('signing out returns to login and forgets the token', (
     tester,
@@ -343,8 +330,6 @@ void main() {
     expect(await built.storage.read(), isNull);
   });
 
-  // The Server rejecting a session mid-use must return to login rather than
-  // showing errors on every screen (client-spec section 6).
   testWidgets('an expired session during use returns to login', (tester) async {
     final server = serverWithCatalogue();
     await signIn(tester, server);
@@ -359,7 +344,6 @@ void main() {
     expect(find.text('Sign in'), findsOneWidget);
   });
 
-  // Session unit behaviour -------------------------------------------------
 
   test('session starts out restoring', () {
     final built = buildSession(FakeServer());

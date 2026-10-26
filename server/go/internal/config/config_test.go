@@ -42,8 +42,6 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	}
 }
 
-// Starting without a datastore URL must fail loudly rather than silently
-// running against a default.
 func TestLoadRequiresDatastoreURLs(t *testing.T) {
 	for _, name := range []string{"AAGASA_POSTGRES_URL", "AAGASA_REDIS_URL", "AAGASA_MONGO_URL"} {
 		t.Run(name, func(t *testing.T) {
@@ -83,10 +81,6 @@ func TestLoadRejectsInvalidStartupTimeout(t *testing.T) {
 	}
 }
 
-// TLS -----------------------------------------------------------------------
-//
-// The Worker presents a shared secret on every gRPC call, so the link between
-// them must be encrypted on any untrusted network (spec.md section 21).
 
 func writeCertificate(t *testing.T) (certFile, keyFile string) {
 	t.Helper()
@@ -150,8 +144,6 @@ func TestTLSMaterialIsAccepted(t *testing.T) {
 	}
 }
 
-// Half a TLS configuration is a misconfiguration, not an instruction to serve
-// plaintext.
 func TestHalfATLSConfigurationIsRefused(t *testing.T) {
 	certFile, keyFile := writeCertificate(t)
 
@@ -175,8 +167,6 @@ func TestHalfATLSConfigurationIsRefused(t *testing.T) {
 	}
 }
 
-// A path that is not there is worth failing on at startup rather than at the
-// first connection.
 func TestUnreadableTLSMaterialIsRefused(t *testing.T) {
 	setValidEnv(t)
 	t.Setenv("AAGASA_TLS_CERT_FILE", filepath.Join(t.TempDir(), "absent.crt"))

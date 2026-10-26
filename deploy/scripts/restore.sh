@@ -1,11 +1,4 @@
 #!/usr/bin/env bash
-# Restore an Aagasa deployment from a backup (plan.md V18).
-#
-#   deploy/scripts/restore.sh /var/backups/aagasa/20260827T120000Z
-#
-# This overwrites the live databases. It stops the Server first, because
-# restoring underneath a running control plane produces a state neither of
-# them agrees with, and it refuses to proceed without an explicit yes.
 
 set -uo pipefail
 

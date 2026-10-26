@@ -10,11 +10,6 @@ import (
 	"aagasa/internal/prediction"
 )
 
-// These tests drive the real Python prediction service over gRPC, which is
-// the V6 exit criterion "Go can consume predictions". They skip unless the
-// service address is configured:
-//
-//	AAGASA_TEST_PREDICTION_ADDRESS=127.0.0.1:9091 go test ./internal/prediction/...
 
 const (
 	issLine1 = "1 25544U 98067A   26236.17729445  .00008773  00000+0  16369-3 0  9990"
@@ -75,7 +70,6 @@ func TestGoConsumesPredictions(t *testing.T) {
 		if pass.Duration <= 0 || pass.Duration > 30*time.Minute {
 			t.Errorf("Duration = %v, implausible for low Earth orbit", pass.Duration)
 		}
-		// Timestamps must survive the protobuf round trip as UTC.
 		if pass.AOS.Location() != time.UTC {
 			t.Errorf("AOS is not UTC: %s", pass.AOS.Location())
 		}
@@ -104,8 +98,6 @@ func TestTrackCrossesTheWireIntact(t *testing.T) {
 		t.Fatalf("track points = %d, want several", len(pass.Track))
 	}
 
-	// The track must start at AOS and finish at LOS so the Worker has an
-	// explicit start and end to drive the rotator between.
 	if !pass.Track[0].At.Equal(pass.AOS) {
 		t.Errorf("track starts at %s, want AOS %s", pass.Track[0].At, pass.AOS)
 	}
@@ -117,8 +109,6 @@ func TestTrackCrossesTheWireIntact(t *testing.T) {
 		if point.AzimuthDegrees < 0 || point.AzimuthDegrees > 360 {
 			t.Errorf("azimuth %f outside 0..360", point.AzimuthDegrees)
 		}
-		// The Worker clamps to the G-550 range, but a track point should not
-		// be wildly outside it in the first place.
 		if point.ElevationDegrees < -1 || point.ElevationDegrees > 90 {
 			t.Errorf("elevation %f implausible", point.ElevationDegrees)
 		}
@@ -144,7 +134,6 @@ func TestNoTrackWhenNoneRequested(t *testing.T) {
 	}
 }
 
-// The same request must give the same answer: scheduling depends on it.
 func TestPredictionsAreDeterministicAcrossCalls(t *testing.T) {
 	client := newClient(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -172,8 +161,6 @@ func TestPredictionsAreDeterministicAcrossCalls(t *testing.T) {
 	}
 }
 
-// A rejected request must be distinguishable from an outage, so the API layer
-// can answer 400 rather than 502.
 func TestInvalidRequestIsTyped(t *testing.T) {
 	client := newClient(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -217,7 +204,6 @@ func TestMaxPassesIsHonoured(t *testing.T) {
 	}
 }
 
-// An unreachable service must surface as an error, not a silent empty result.
 func TestUnreachableServiceIsAnError(t *testing.T) {
 	client, err := prediction.Dial("127.0.0.1:9")
 	if err != nil {

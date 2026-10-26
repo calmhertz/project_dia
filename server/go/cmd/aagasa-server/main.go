@@ -1,4 +1,3 @@
-// Command aagasa-server runs the Aagasa control plane.
 package main
 
 import (
@@ -32,14 +31,12 @@ import (
 	"aagasa/internal/workerapi"
 )
 
-// Version is the Server build version.
 const Version = "0.1.0"
 
 const shutdownTimeout = 15 * time.Second
 
 func main() {
 	if err := run(); err != nil {
-		// The logger may not exist yet, so report to stderr and exit non-zero.
 		slog.New(slog.NewJSONHandler(os.Stderr, nil)).Error("server failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
@@ -84,14 +81,10 @@ func run() error {
 	sessions := store.NewSessionStore(stores.Redis)
 	authService := auth.NewService(repository, sessions, logger, cfg.SessionTTL)
 
-	// spec.md section 17.1: the very first start creates root/toor with a
-	// forced password change.
 	if err := authService.EnsureBootstrapRoot(startupCtx); err != nil {
 		return err
 	}
 
-	// spec.md section 11.3: CelesTrak first, SatNOGS as fallback, then the
-	// last known-good record already in the database.
 	satnogs := tle.NewSatNOGS(cfg.SatNOGSURL, 0)
 	providers := tle.NewChain(logger, tle.NewCelestrak(cfg.CelestrakURL, 0), satnogs)
 	catalogService := catalog.NewService(repository, providers, satnogs, logger)
@@ -102,8 +95,6 @@ func run() error {
 	}
 	defer func() { _ = predictionClient.Close() }()
 
-	// The prediction service is allowed to start after the Server; readiness
-	// reports the truth rather than blocking startup.
 	if err := predictionClient.Health(startupCtx); err != nil {
 		logger.Warn("prediction service not reachable at startup", slog.String("error", err.Error()))
 	} else {
@@ -139,9 +130,6 @@ func run() error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	// TLS covers both listeners or neither. The Worker presents a shared
-	// secret on every gRPC call, so an unencrypted link between them would
-	// put that credential on the wire (spec.md section 21).
 	grpcOptions := []grpc.ServerOption{
 		grpc.UnaryInterceptor(workerapi.SharedSecretInterceptor(cfg.WorkerSharedSecret)),
 	}
@@ -150,8 +138,6 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("load TLS material: %w", err)
 		}
-		// TLS 1.2 is the floor: older versions are not worth the ground a
-		// station stands on.
 		settings := &tls.Config{
 			Certificates: []tls.Certificate{certificate},
 			MinVersion:   tls.VersionTLS12,
@@ -160,8 +146,6 @@ func run() error {
 		grpcOptions = append(grpcOptions, grpc.Creds(credentials.NewTLS(settings)))
 		logger.Info("tls enabled for http and grpc")
 	} else if cfg.Environment == "production" {
-		// Not fatal: a deployment may terminate TLS in front of this process.
-		// Silence would be worse than a warning nobody needed.
 		logger.Warn("tls is not configured; the worker credential will cross the network in clear " +
 			"unless something in front terminates TLS")
 	}
@@ -174,8 +158,6 @@ func run() error {
 		return err
 	}
 
-	// spec.md section 6.3: a station that stops reporting must be shown
-	// offline, because scheduling depends on it.
 	go workerapi.RunStaleWorkerMonitor(ctx, repository, logger)
 
 	if cfg.TLERefreshEnabled {
@@ -189,8 +171,6 @@ func run() error {
 	go func() {
 		logger.Info("http listening",
 			slog.String("address", cfg.HTTPAddress), slog.Bool("tls", cfg.TLSEnabled()))
-		// The certificate is already loaded into TLSConfig, so the paths are
-		// deliberately empty here.
 		serve := httpServer.ListenAndServe
 		if cfg.TLSEnabled() {
 			serve = func() error { return httpServer.ListenAndServeTLS("", "") }

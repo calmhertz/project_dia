@@ -10,18 +10,7 @@ import (
 	"aagasa/internal/store"
 )
 
-// The Root control surface (V15): the complete station configuration, and the
-// audit trail.
-//
-// Two rules run through all of it. A configuration change never rewrites an
-// already-approved pass; it reports how many are affected and leaves them
-// alone (client-spec section 29). And every change here is audited, because
-// these are the actions that most need to be answerable for later.
 
-// upcomingPassWarning counts the passes a configuration change may affect.
-//
-// Counting rather than changing is the point: the operator is told what is
-// already committed under the old settings and decides what to do about it.
 func (s *Server) upcomingPassWarning(r *http.Request) (int, error) {
 	passes, err := s.repo.ListPasses(r.Context(), store.PassFilter{
 		Statuses: []domain.PassStatus{domain.PassPendingApproval, domain.PassApproved},
@@ -64,7 +53,6 @@ type stationConfigResponse struct {
 	UpcomingPasses   int                `json:"upcoming_passes"`
 }
 
-// handleGetStationConfig returns the complete configuration, Root only.
 func (s *Server) handleGetStationConfig(w http.ResponseWriter, r *http.Request) {
 	station, ok := s.primaryStation(w, r)
 	if !ok {
@@ -123,11 +111,6 @@ type updateStationRequest struct {
 	ActiveRFBand     *string  `json:"active_rf_band"`
 }
 
-// handleUpdateStation changes station identity, location or active band.
-//
-// Moving the station changes every future prediction, and switching bands
-// changes what the next pass records. Neither rewrites a pass that is already
-// approved (spec.md section 13.8).
 func (s *Server) handleUpdateStation(w http.ResponseWriter, r *http.Request) {
 	var request updateStationRequest
 	if err := decodeJSON(w, r, &request); err != nil {
@@ -213,8 +196,6 @@ func (s *Server) handleUpdateStation(w http.ResponseWriter, r *http.Request) {
 		"latitude_degrees": saved.Latitude, "longitude_degrees": saved.Longitude,
 		"altitude_m": saved.AltitudeM, "timezone": saved.Timezone,
 		"active_rf_band": string(saved.ActiveRFBand),
-		// Not a refusal. The operator is told what is already committed under
-		// the previous settings; nothing was rewritten.
 		"upcoming_passes_unchanged": upcoming,
 	})
 }
@@ -228,7 +209,6 @@ type updateBandRequest struct {
 	BiasTeeEnabled     *bool    `json:"bias_tee_enabled"`
 }
 
-// handleUpdateBandConfig changes the antenna and radio settings for one band.
 func (s *Server) handleUpdateBandConfig(w http.ResponseWriter, r *http.Request) {
 	band := r.PathValue("band")
 	if !isBand(band) {
@@ -316,11 +296,6 @@ type updateHardwareRequest struct {
 	SDRDeviceIdentifier         *string `json:"sdr_device_identifier"`
 }
 
-// handleUpdateHardwareConfig changes the rotator and SDR settings.
-//
-// Park angles are validated against the G-550's real limits before they are
-// stored, because an out-of-range angle would be sent to the rotator
-// (spec.md section 9).
 func (s *Server) handleUpdateHardwareConfig(w http.ResponseWriter, r *http.Request) {
 	var request updateHardwareRequest
 	if err := decodeJSON(w, r, &request); err != nil {
@@ -392,9 +367,6 @@ func (s *Server) handleUpdateHardwareConfig(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// The serial port and device identifier are configuration, not secrets,
-	// but the audit record keeps them for exactly the same reason the change
-	// is audited at all: someone will need to know what changed and when.
 	s.auditChange(r, "station.hardware_updated", "station", station.ID.String(),
 		map[string]any{
 			"rotator_serial_port": previous.RotatorSerialPort,
@@ -435,12 +407,6 @@ type auditView struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// handleListAudit returns the audit trail, Root only.
-//
-// The recorded state is deliberately not returned: it is written for forensic
-// reading at the database, and some of it names configuration an operator
-// should not be able to browse casually over HTTP. What, who, which subject
-// and when is what an administrator needs.
 func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {
 	limit := auditListLimit
 	if raw := r.URL.Query().Get("limit"); raw != "" {

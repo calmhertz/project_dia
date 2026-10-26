@@ -14,19 +14,12 @@ import (
 )
 
 var (
-	// ErrInvalidCredentials is returned for any failed login. It deliberately
-	// does not distinguish an unknown user from a wrong password.
 	ErrInvalidCredentials = errors.New("invalid username or password")
-	// ErrPasswordChangeRequired means the caller must change their password
-	// before doing anything else.
 	ErrPasswordChangeRequired = errors.New("password change required")
-	// ErrForbidden means the caller is authenticated but not permitted.
 	ErrForbidden = errors.New("not permitted")
-	// ErrUnauthenticated means no valid session was presented.
 	ErrUnauthenticated = errors.New("authentication required")
 )
 
-// Service owns credentials and sessions.
 type Service struct {
 	repo       *store.Repository
 	sessions   *store.SessionStore
@@ -34,15 +27,10 @@ type Service struct {
 	sessionTTL time.Duration
 }
 
-// NewService builds the authentication service.
 func NewService(repo *store.Repository, sessions *store.SessionStore, logger *slog.Logger, sessionTTL time.Duration) *Service {
 	return &Service{repo: repo, sessions: sessions, logger: logger, sessionTTL: sessionTTL}
 }
 
-// EnsureBootstrapRoot creates the initial Root account if no user exists.
-//
-// spec.md section 17.1 fixes the first-run credentials as root/toor with an
-// immediate forced password change. Nothing else works until that happens.
 func (s *Service) EnsureBootstrapRoot(ctx context.Context) error {
 	count, err := s.repo.CountUsers(ctx)
 	if err != nil {
@@ -66,7 +54,6 @@ func (s *Service) EnsureBootstrapRoot(ctx context.Context) error {
 		return fmt.Errorf("create root: %w", err)
 	}
 
-	// Never log the credential itself, only that bootstrap happened.
 	s.logger.Warn("bootstrap root account created; password change is required before use")
 	_, err = s.repo.AppendAudit(ctx, domain.AuditRecord{
 		Action: "user.bootstrap_created", EntityType: "user", EntityID: root.ID.String(),
@@ -75,7 +62,6 @@ func (s *Service) EnsureBootstrapRoot(ctx context.Context) error {
 	return err
 }
 
-// LoginResult carries the outcome of a successful authentication.
 type LoginResult struct {
 	Token              string
 	User               domain.User
@@ -83,16 +69,10 @@ type LoginResult struct {
 	ExpiresAt          time.Time
 }
 
-// Login verifies credentials and issues a session.
-//
-// A user with must_change_password still receives a session: they need one to
-// call ChangePassword. Every other operation is refused until they do.
 func (s *Service) Login(ctx context.Context, username, password string) (LoginResult, error) {
 	user, err := s.repo.GetUserByUsername(ctx, username)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			// Spend comparable time on an unknown user so the response time
-			// does not reveal whether the account exists.
 			_ = VerifyPassword(password, decoyHash)
 			return LoginResult{}, ErrInvalidCredentials
 		}
@@ -127,8 +107,6 @@ func (s *Service) Login(ctx context.Context, username, password string) (LoginRe
 	}, nil
 }
 
-// decoyHash makes an unknown-user login cost roughly the same as a real one.
-// It is a valid Argon2id hash of a value nobody can supply.
 var decoyHash = mustHash()
 
 func mustHash() string {
@@ -139,12 +117,10 @@ func mustHash() string {
 	return hash
 }
 
-// Logout revokes a session token.
 func (s *Service) Logout(ctx context.Context, token string) error {
 	return s.sessions.Delete(ctx, token)
 }
 
-// Resolve turns a session token into its user.
 func (s *Service) Resolve(ctx context.Context, token string) (domain.User, error) {
 	session, err := s.sessions.Get(ctx, token)
 	if err != nil {
@@ -157,7 +133,6 @@ func (s *Service) Resolve(ctx context.Context, token string) (domain.User, error
 	user, err := s.repo.GetUserByID(ctx, session.UserID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			// The account was removed while the session was still alive.
 			_ = s.sessions.Delete(ctx, token)
 			return domain.User{}, ErrUnauthenticated
 		}
@@ -166,10 +141,6 @@ func (s *Service) Resolve(ctx context.Context, token string) (domain.User, error
 	return user, nil
 }
 
-// ChangePassword replaces a user's password after checking the current one.
-//
-// The forced-change flag is cleared, which is what retires the bootstrap
-// credential (spec.md section 17.1).
 func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error {
 	user, err := s.repo.GetUserByID(ctx, userID)
 	if err != nil {
@@ -195,7 +166,6 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, currentP
 	return nil
 }
 
-// audit records a security event, never the credential involved.
 func (s *Service) audit(ctx context.Context, actor *uuid.UUID, action, entityType, entityID string, details map[string]any) {
 	if _, err := s.repo.AppendAudit(ctx, domain.AuditRecord{
 		ActorUserID: actor, Action: action, EntityType: entityType,

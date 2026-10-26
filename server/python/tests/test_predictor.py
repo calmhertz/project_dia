@@ -22,7 +22,6 @@ ISS_LINE2 = "2 25544  51.6333 323.5788 0007697  77.8713 282.3138 15.496008475822
 NOAA19_LINE1 = "1 33591U 09005A   26236.28857781  .00000013  00000+0  30729-4 0  9998"
 NOAA19_LINE2 = "2 33591  98.9473 307.1961 0013555 193.3958 166.6856 14.13483201904106"
 
-# SJCIT, Karnataka.
 STATION = dict(latitude_degrees=13.394944, longitude_degrees=77.729444, altitude_m=915)
 
 WINDOW_START = datetime(2026, 8, 24, tzinfo=timezone.utc)
@@ -49,12 +48,9 @@ def test_reports_the_catalog_number_from_the_elements():
 def test_finds_passes_for_a_known_satellite_and_station():
     _, passes = predict()
 
-    # The ISS makes several visible passes over this station in two days.
     assert 2 <= len(passes) <= 12
 
 
-# The same inputs must always produce the same output: scheduling decisions
-# are built on these numbers.
 def test_predictions_are_deterministic():
     first = predict()[1]
     second = predict()[1]
@@ -78,7 +74,6 @@ def test_pass_times_are_ordered_and_consistent():
         expected = (satellite_pass.los - satellite_pass.aos).total_seconds()
         assert satellite_pass.duration_seconds == pytest.approx(expected)
 
-        # Passes come back in chronological order and cannot overlap.
         if previous_los is not None:
             assert satellite_pass.aos > previous_los
         previous_los = satellite_pass.los
@@ -88,9 +83,7 @@ def test_geometry_is_physically_plausible():
     _, passes = predict()
 
     for satellite_pass in passes:
-        # A low-Earth-orbit pass is minutes, not hours.
         assert 0 < satellite_pass.duration_seconds < 1800
-        # The peak must clear the threshold and stay below the zenith.
         assert MIN_ELEVATION <= satellite_pass.max_elevation_degrees <= 90
         for azimuth in (satellite_pass.aos_azimuth_degrees,
                         satellite_pass.tca_azimuth_degrees,
@@ -98,8 +91,6 @@ def test_geometry_is_physically_plausible():
             assert 0 <= azimuth <= 360
 
 
-# AOS and LOS are defined by the configured threshold, so the satellite should
-# sit essentially on it at both ends.
 def test_pass_boundaries_sit_on_the_minimum_elevation():
     _, passes = predict(track_step_seconds=10)
 
@@ -118,8 +109,6 @@ def test_raising_the_threshold_yields_fewer_shorter_passes():
 
 
 def test_no_passes_is_a_valid_answer():
-    # A near-polar orbiter is not visible from an equatorial station at a very
-    # high elevation threshold within a short window.
     _, passes = predict(
         line1=NOAA19_LINE1, line2=NOAA19_LINE2,
         minimum_elevation_degrees=85.0,
@@ -143,7 +132,6 @@ def test_southern_hemisphere_station():
         assert satellite_pass.max_elevation_degrees >= MIN_ELEVATION
 
 
-# Track --------------------------------------------------------------------
 
 def test_track_is_omitted_unless_requested():
     _, passes = predict()
@@ -155,7 +143,6 @@ def test_track_spans_the_whole_pass_at_the_requested_spacing():
     satellite_pass = passes[0]
 
     assert satellite_pass.track[0].at == satellite_pass.aos
-    # The last sample is pinned to LOS so the Worker has an explicit end.
     assert satellite_pass.track[-1].at == pytest.approx(
         satellite_pass.los, abs=timedelta(seconds=1))
 
@@ -176,7 +163,6 @@ def test_track_range_is_plausible_for_low_earth_orbit():
     _, passes = predict(track_step_seconds=15)
 
     for point in passes[0].track:
-        # Slant range from the horizon to overhead for a ~420 km orbit.
         assert 300 < point.range_km < 3000
 
 
@@ -190,7 +176,6 @@ def test_finer_spacing_produces_more_points():
 def test_a_one_second_track_over_a_normal_pass_is_allowed():
     _, passes = predict(track_step_seconds=1, max_passes=1)
 
-    # A LEO pass is a few hundred seconds, well inside the point budget.
     assert 0 < len(passes[0].track) <= MAX_TRACK_POINTS
 
 
@@ -213,14 +198,12 @@ def test_a_track_that_would_be_unbounded_is_refused():
     })
 
     rise = timescale.utc(2026, 8, 24, 0, 0, 0)
-    # A ten-hour window at one-second spacing is far past the budget.
     setting = timescale.utc(2026, 8, 24, 10, 0, 0)
 
     with pytest.raises(PredictionError, match=str(MAX_TRACK_POINTS)):
         _build_track(difference, rise, setting, 1)
 
 
-# Limits and validation ----------------------------------------------------
 
 def test_max_passes_caps_the_result():
     _, passes = predict(max_passes=2)
@@ -256,8 +239,6 @@ def test_invalid_requests_are_rejected_with_a_clear_message(overrides, message):
      "2 99999 999.9999 999.9999 9999999 999.9999 999.9999 99.99999999999999"),
 ])
 def test_unusable_elements_are_rejected(line1, line2):
-    # Every rejection must be a PredictionError, never a leaked AttributeError
-    # or a satellite that silently produces nonsense.
     with pytest.raises(PredictionError):
         build_satellite(line1, line2)
 

@@ -4,11 +4,6 @@ import 'package:provider/provider.dart';
 import '../../api/api_exception.dart';
 import '../../state/session.dart';
 
-/// Add a satellite by catalog number, Root only.
-///
-/// The catalog number is the identity; the name is only a label. The Server
-/// fetches orbital data before it stores anything, so a satellite that
-/// appears in the catalogue can always be tracked (spec.md section 11.1).
 class AddSatelliteDialog extends StatefulWidget {
   const AddSatelliteDialog({super.key});
 
@@ -56,8 +51,6 @@ class _AddSatelliteDialogState extends State<AddSatelliteDialog> {
     }
   }
 
-  /// The two refusals worth their own wording: everything else is the
-  /// Server's message, which is already written for a reader.
   static String _explain(ApiException error) => switch (error.code) {
     'no_orbital_data' =>
       'No orbital data provider has this catalog number. Check the number, '

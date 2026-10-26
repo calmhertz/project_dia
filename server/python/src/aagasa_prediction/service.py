@@ -36,8 +36,6 @@ class PredictionService(prediction_pb2_grpc.PredictionServiceServicer):
                 max_passes=request.max_passes,
             )
         except PredictionError as error:
-            # A bad request is the caller's to fix, so say so precisely
-            # rather than returning an opaque internal error.
             context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(error))
             return prediction_pb2.PredictPassesResponse()
         except Exception as error:  # noqa: BLE001 - must not leak a traceback

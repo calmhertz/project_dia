@@ -23,17 +23,14 @@ from aagasa_worker.hardware.errors import SatDumpError
 
 logger = logging.getLogger(__name__)
 
-# Searched in order; a user-installed pipeline overrides the system one.
 DEFAULT_PIPELINE_DIRS = (
     Path.home() / ".local/share/satdump/pipelines",
     Path("/usr/share/satdump/pipelines"),
-    # SatDump 2.x packages keep the bundled pipelines under resources.
     Path("/usr/share/satdump/resources/pipelines"),
     Path("/usr/local/share/satdump/pipelines"),
 )
 
 STOP_GRACE_SECONDS = 10
-# Enough output to diagnose a failure without unbounded memory growth.
 MAX_CAPTURED_OUTPUT = 64 * 1024
 
 
@@ -56,8 +53,6 @@ def strip_jsonc_comments(text: str) -> str:
         if in_string:
             out.append(char)
             if char == "\\" and index + 1 < length:
-                # Keep the escaped character so an escaped quote does not
-                # look like the end of the string.
                 out.append(text[index + 1])
                 index += 2
                 continue
@@ -103,7 +98,6 @@ class Pipeline:
 
     identifier: str
     name: str
-    # Only a live-capable pipeline can decode straight from the SDR.
     supports_live: bool
     source_file: str
 
@@ -116,7 +110,6 @@ class ProcessResult:
     exit_code: int | None
     stdout: str
     stderr: str
-    # True when the Worker stopped the process on purpose, as at end of pass.
     terminated: bool = False
 
 
@@ -145,7 +138,6 @@ def discover_pipelines(pipeline_dirs=None) -> list[Pipeline]:
             for identifier, definition in definitions.items():
                 if not isinstance(definition, dict):
                     continue
-                # First directory wins, so a user override is not replaced.
                 if identifier in found:
                     continue
                 found[identifier] = Pipeline(
@@ -165,7 +157,6 @@ class SatDump:
                  legacy_cli: bool = False):
         self._binary = binary
         self._pipeline_dirs = pipeline_dirs
-        # SatDump 2.x moved the old live/record commands under `legacy`.
         self._legacy_cli = legacy_cli
 
     def check(self) -> str:
@@ -252,8 +243,6 @@ class SatDump:
         """Start SatDump in the background for a pass."""
         logger.info("starting satdump argv0=%s mode=%s", command[0], command[1] if len(command) > 1 else "")
         try:
-            # start_new_session isolates the child so a signal to the Worker
-            # does not kill a capture before it can be finalised cleanly.
             return subprocess.Popen(
                 command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 encoding="utf-8", errors="replace", start_new_session=True,

@@ -1,4 +1,3 @@
-// Package httpapi serves the Server's REST surface.
 package httpapi
 
 import (
@@ -19,10 +18,8 @@ import (
 
 const checkTimeout = 3 * time.Second
 
-// storeRepository aliases the repository type so handlers read cleanly.
 type storeRepository = store.Repository
 
-// Dependencies are what the HTTP layer needs to serve requests.
 type Dependencies struct {
 	Files      *filestore.Store
 	Stores     *store.Stores
@@ -31,11 +28,9 @@ type Dependencies struct {
 	Catalog    *catalog.Service
 	Scheduling *scheduling.Service
 	Prediction *prediction.Client
-	// WebDir holds the built Flutter client. Empty serves the API only.
 	WebDir string
 }
 
-// Server holds the HTTP handlers and their dependencies.
 type Server struct {
 	logger     *slog.Logger
 	version    string
@@ -48,7 +43,6 @@ type Server struct {
 	prediction *prediction.Client
 }
 
-// NewMux builds the HTTP handler.
 func NewMux(logger *slog.Logger, version string, deps Dependencies) http.Handler {
 	s := &Server{
 		logger: logger, version: version,
@@ -60,24 +54,19 @@ func NewMux(logger *slog.Logger, version string, deps Dependencies) http.Handler
 
 	mux := http.NewServeMux()
 
-	// Health -------------------------------------------------------------
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /readyz", s.handleReady)
 
-	// Authentication -------------------------------------------------------
 	mux.HandleFunc("POST /api/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/auth/logout", s.requireAuth(s.handleLogout))
-	// Reachable while a password change is still owed: it is the way out.
 	mux.HandleFunc("POST /api/auth/change-password", s.requireAuth(s.handleChangePassword))
 	mux.HandleFunc("GET /api/auth/me", s.requireAuth(s.handleMe))
 
-	// Users ---------------------------------------------------------------
 	mux.HandleFunc("GET /api/users", s.roleGated(domain.RoleAdmin, s.handleListUsers))
 	mux.HandleFunc("POST /api/users", s.roleGated(domain.RoleAdmin, s.handleCreateUser))
 	mux.HandleFunc("PATCH /api/users/{id}", s.roleGated(domain.RoleRoot, s.handleUpdateUser))
 	mux.HandleFunc("DELETE /api/users/{id}", s.roleGated(domain.RoleRoot, s.handleDeleteUser))
 
-	// Satellites -----------------------------------------------------------
 	mux.HandleFunc("GET /api/satellites", s.authenticated(s.handleListSatellites))
 	mux.HandleFunc("GET /api/satellites/{id}", s.authenticated(s.handleGetSatellite))
 	mux.HandleFunc("GET /api/satellites/{id}/tles", s.authenticated(s.handleGetSatelliteTLEs))
@@ -88,7 +77,6 @@ func NewMux(logger *slog.Logger, version string, deps Dependencies) http.Handler
 	mux.HandleFunc("POST /api/satellites/refresh-tles", s.roleGated(domain.RoleAdmin, s.handleRefreshTLEs))
 	mux.HandleFunc("POST /api/satellites/{id}/refresh-metadata", s.roleGated(domain.RoleRoot, s.handleRefreshSatelliteMetadata))
 
-	// Passes ---------------------------------------------------------------
 	mux.HandleFunc("GET /api/passes", s.authenticated(s.handleListPasses))
 	mux.HandleFunc("POST /api/passes", s.authenticated(s.handleRequestPass))
 	mux.HandleFunc("GET /api/passes/{id}", s.authenticated(s.handleGetPass))
@@ -97,41 +85,30 @@ func NewMux(logger *slog.Logger, version string, deps Dependencies) http.Handler
 	mux.HandleFunc("POST /api/passes/{id}/cancel", s.authenticated(s.handleCancelPass))
 	mux.HandleFunc("GET /api/passes/{id}/plan", s.roleGated(domain.RoleAdmin, s.handleGetPassPlan))
 
-	// Scheduling configuration ----------------------------------------------
-	// Readable by Admin, writable by Root only.
 	mux.HandleFunc("GET /api/scheduling-config", s.roleGated(domain.RoleAdmin, s.handleGetSchedulingConfig))
 	mux.HandleFunc("PUT /api/scheduling-config", s.roleGated(domain.RoleRoot, s.handleUpdateSchedulingConfig))
 
-	// Operational views ------------------------------------------------------
 	mux.HandleFunc("GET /api/station", s.roleGated(domain.RoleAdmin, s.handleStationStatus))
 	mux.HandleFunc("GET /api/tle-status", s.roleGated(domain.RoleAdmin, s.handleTLEStatus))
 
-	// Station configuration and the audit trail, Root only -------------------
 	mux.HandleFunc("GET /api/station/config", s.roleGated(domain.RoleRoot, s.handleGetStationConfig))
 	mux.HandleFunc("PATCH /api/station", s.roleGated(domain.RoleRoot, s.handleUpdateStation))
 	mux.HandleFunc("PUT /api/station/bands/{band}", s.roleGated(domain.RoleRoot, s.handleUpdateBandConfig))
 	mux.HandleFunc("PUT /api/station/hardware", s.roleGated(domain.RoleRoot, s.handleUpdateHardwareConfig))
 	mux.HandleFunc("GET /api/audit", s.roleGated(domain.RoleRoot, s.handleListAudit))
 
-	// SatDump pipelines -------------------------------------------------------
-	// Anyone may see what is available; uploading a custom one is Admin work.
 	mux.HandleFunc("GET /api/pipelines", s.authenticated(s.handleListPipelines))
 	mux.HandleFunc("POST /api/pipelines", s.roleGated(domain.RoleAdmin, s.handleCreatePipeline))
 
-	// Recordings -------------------------------------------------------------
 	mux.HandleFunc("GET /api/recordings", s.authenticated(s.handleListRecordings))
 	mux.HandleFunc("GET /api/passes/{id}/recordings", s.authenticated(s.handleListPassRecordings))
 	mux.HandleFunc("GET /api/recordings/{id}/download", s.authenticated(s.handleDownloadRecording))
 
-	// Workers ----------------------------------------------------------------
 	mux.HandleFunc("GET /api/workers", s.roleGated(domain.RoleAdmin, s.handleListWorkers))
 
-	// First-run setup -------------------------------------------------------
 	mux.HandleFunc("GET /api/setup", s.authenticated(s.handleSetupStatus))
 	mux.HandleFunc("POST /api/setup", s.authenticated(s.handleSetup))
 
-	// Flutter web client ----------------------------------------------------
-	// Registered last: every API route above is more specific and wins.
 	registerStatic(mux, s.logger, deps.WebDir)
 
 	return mux
@@ -143,8 +120,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleReady reports dependency reachability. It names components and
-// booleans only, never addresses or driver errors.
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), checkTimeout)
 	defer cancel()
@@ -171,9 +146,6 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	response := map[string]any{
 		"status": status, "version": s.version, "components": components,
 	}
-	// Storage is reported but does not decide readiness. A full disk stops
-	// uploads; scheduling, approving and browsing all still work, and taking
-	// the whole API out of service would help nobody.
 	if s.files != nil {
 		if usage, err := s.files.RecordingsUsage(); err == nil {
 			response["storage"] = map[string]any{
@@ -195,7 +167,6 @@ func (s *Server) check(ctx context.Context, name string, probe func(context.Cont
 	return true
 }
 
-// audit records a privileged action taken through the API.
 func (s *Server) audit(r *http.Request, action, entityType, entityID string, details map[string]any) {
 	actor := currentUser(r)
 	if _, err := s.repo.AppendAudit(r.Context(), domain.AuditRecord{
@@ -207,8 +178,6 @@ func (s *Server) audit(r *http.Request, action, entityType, entityID string, det
 	}
 }
 
-// auditChange records a configuration change with what it replaced, so the
-// trail answers "what was it before" and not only "it changed".
 func (s *Server) auditChange(r *http.Request, action, entityType, entityID string,
 	previous, next map[string]any) {
 	actor := currentUser(r)

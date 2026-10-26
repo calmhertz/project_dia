@@ -8,11 +8,6 @@ import '../../widgets/states.dart';
 import '../pass_detail_screen.dart';
 import '../satellites_screen.dart' show describeError;
 
-/// Every pass on the station, whoever requested it.
-///
-/// This is the operational record: cancelled and rejected passes stay
-/// visible, because history that quietly drops its failures is not history
-/// (spec.md section 13).
 class PassHistoryScreen extends StatefulWidget {
   const PassHistoryScreen({super.key});
 

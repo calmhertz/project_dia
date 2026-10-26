@@ -9,8 +9,6 @@ import (
 	"aagasa/internal/httpapi"
 )
 
-// The browser client runs on its own origin, so without CORS every call it
-// makes is blocked before it reaches a handler. These tests need no database.
 
 func corsHandler(options httpapi.CORSOptions) http.Handler {
 	return httpapi.WithCORS(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +31,6 @@ func TestCORSIsOffUntilConfigured(t *testing.T) {
 	if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != "" {
 		t.Errorf("an unconfigured server allows %q", got)
 	}
-	// The API still works; only the browser's cross-origin use is refused.
 	if recorder.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", recorder.Code)
 	}
@@ -56,12 +53,10 @@ func TestPreflightFromAnAllowedOrigin(t *testing.T) {
 	if header.Get("Access-Control-Allow-Origin") != "https://ground.example" {
 		t.Errorf("allow-origin = %q", header.Get("Access-Control-Allow-Origin"))
 	}
-	// The session travels in this header, so it has to be permitted.
 	allowed := header.Get("Access-Control-Allow-Headers")
 	if !strings.Contains(strings.ToLower(allowed), "authorization") {
 		t.Errorf("allow-headers = %q, want Authorization", allowed)
 	}
-	// A cached response must never be reused across origins.
 	if header.Get("Vary") == "" {
 		t.Error("the response does not vary on Origin")
 	}
@@ -84,9 +79,6 @@ func TestPreflightFromAnUnknownOriginIsRefused(t *testing.T) {
 	}
 }
 
-// The session is a bearer token in a header rather than a cookie, so
-// credentialed cross-origin requests are never permitted and the wildcard
-// origin is never used.
 func TestCORSNeverAllowsCredentialsOrTheWildcard(t *testing.T) {
 	recorder := corsResponse(httpapi.CORSOptions{
 		AllowedOrigins: []string{"https://ground.example"},
@@ -101,8 +93,6 @@ func TestCORSNeverAllowsCredentialsOrTheWildcard(t *testing.T) {
 	}
 }
 
-// The Flutter dev server picks a port at random, so development allows any
-// localhost port. It must not allow a host that merely looks like one.
 func TestLocalhostAllowanceIsExactlyLocalhost(t *testing.T) {
 	options := httpapi.CORSOptions{AllowLocalhost: true}
 
@@ -125,8 +115,6 @@ func TestLocalhostAllowanceIsExactlyLocalhost(t *testing.T) {
 	}
 }
 
-// A download reads the file name from this header, which is not exposed to
-// script by default.
 func TestContentDispositionIsExposed(t *testing.T) {
 	recorder := corsResponse(httpapi.CORSOptions{AllowLocalhost: true},
 		http.MethodGet, "http://localhost:5000")

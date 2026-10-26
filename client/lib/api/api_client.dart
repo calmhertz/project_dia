@@ -7,21 +7,11 @@ import 'package:http/http.dart' as http;
 import '../models/models.dart';
 import 'api_exception.dart';
 
-/// The Client's only route to Aagasa.
-///
-/// It talks to the Server and nothing else: never the Worker, a datastore or
-/// an external provider (client-spec section 0).
 class ApiClient {
   ApiClient({String? baseUrl, http.Client? httpClient})
     : baseUrl = baseUrl ?? defaultBaseUrl,
       _http = httpClient ?? http.Client();
 
-  /// Supplied at build time:
-  /// `flutter run --dart-define=AAGASA_SERVER_URL=https://host:8080`
-  ///
-  /// On the web with no override it is the page's own origin, so the client
-  /// talks to the Server through whatever reverse proxy serves the UI. That
-  /// keeps the session same-origin and needs no CORS configuration.
   static String get defaultBaseUrl {
     const configured = String.fromEnvironment('AAGASA_SERVER_URL');
     if (configured.isNotEmpty) return configured;
@@ -34,16 +24,12 @@ class ApiClient {
   final String baseUrl;
   final http.Client _http;
 
-  /// Session token, set after login and cleared on logout or expiry.
   String? token;
 
-  /// Called when the Server rejects the session, so the app can return to
-  /// login rather than showing errors on every screen.
   void Function()? onSessionExpired;
 
   void dispose() => _http.close();
 
-  // Requests ---------------------------------------------------------------
 
   Future<Map<String, dynamic>> _send(
     String method,
@@ -67,7 +53,6 @@ class ApiClient {
     } on TimeoutException {
       throw const NetworkException('The server did not respond in time.');
     } catch (_) {
-      // Any transport failure is the same thing to the user: unreachable.
       throw const NetworkException('Cannot reach the server.');
     }
 
@@ -90,7 +75,6 @@ class ApiClient {
     }
 
     if (response.statusCode >= 400) {
-      // A rejected session ends the session everywhere, not just here.
       if (response.statusCode == 401) onSessionExpired?.call();
       throw ApiException(
         statusCode: response.statusCode,
@@ -102,7 +86,6 @@ class ApiClient {
     return decoded;
   }
 
-  // Authentication ---------------------------------------------------------
 
   Future<({String token, AuthUser user})> login(
     String username,
@@ -136,7 +119,6 @@ class ApiClient {
     await _send('POST', '/api/auth/logout');
   }
 
-  // Satellites -------------------------------------------------------------
 
   Future<List<Satellite>> satellites() async {
     final response = await _send('GET', '/api/satellites');
@@ -165,7 +147,6 @@ class ApiClient {
     );
   }
 
-  // Passes -----------------------------------------------------------------
 
   Future<List<Pass>> passes({String scope = 'mine', String? status}) async {
     final query = StringBuffer('?scope=$scope');
@@ -199,10 +180,7 @@ class ApiClient {
         'band': band,
         'recording_mode': recordingMode,
         'visibility': isPublic ? 'public' : 'private',
-        // Required by the Server for any mode that decodes.
         'pipeline_id': ?pipelineId,
-        // Root only, and refused for anyone else. It cancels conflicting
-        // passes; it never bypasses the lead time (spec.md section 13.7).
         if (override) 'override': true,
       },
     );
@@ -226,13 +204,10 @@ class ApiClient {
     return Pass.fromJson(response['pass'] as Map<String, dynamic>);
   }
 
-  // SatDump pipelines --------------------------------------------------------
 
   Future<PipelineCatalogue> pipelines() async =>
       PipelineCatalogue.fromJson(await _send('GET', '/api/pipelines'));
 
-  /// Upload a custom pipeline definition. Admin only, and the Server decides
-  /// whether the JSON is acceptable.
   Future<SatDumpPipeline> uploadPipeline({
     required String name,
     required String definition,
@@ -245,9 +220,7 @@ class ApiClient {
     return SatDumpPipeline.fromJson(response);
   }
 
-  // Recordings -------------------------------------------------------------
 
-  /// Every recording the caller may see, newest first.
   Future<List<Recording>> recordings({String scope = 'mine'}) async {
     final response = await _send('GET', '/api/recordings?scope=$scope');
     return ((response['recordings'] as List<dynamic>?) ?? const [])
@@ -262,8 +235,6 @@ class ApiClient {
         .toList();
   }
 
-  /// Absolute URL for a download, with the session token attached by the
-  /// caller's request headers rather than the query string.
   Uri downloadUri(Recording recording) =>
       Uri.parse('$baseUrl${recording.downloadUrl}');
 
@@ -287,10 +258,6 @@ class ApiClient {
     }
   }
 
-  // Administration ---------------------------------------------------------
-  //
-  // The Server refuses these to anyone below Admin; the client hides them for
-  // usability, never for security (client-spec section 4).
 
   Future<Pass> approvePass(String id) async {
     final response = await _send('POST', '/api/passes/$id/approve');
@@ -302,7 +269,6 @@ class ApiClient {
     return Pass.fromJson(response['pass'] as Map<String, dynamic>);
   }
 
-  /// The accounts an Admin may see, used to name a pass requester.
   Future<List<AuthUser>> users() async {
     final response = await _send('GET', '/api/users');
     return ((response['users'] as List<dynamic>?) ?? const [])
@@ -335,24 +301,14 @@ class ApiClient {
     await _send('POST', '/api/satellites/refresh-tles'),
   );
 
-  // Root configuration -------------------------------------------------------
-  //
-  // Root only, on the Server's authority. The client hides these controls for
-  // usability; hiding them is never what keeps them safe.
 
   Future<SetupStatus> setupStatus() async =>
       SetupStatus.fromJson(await _send('GET', '/api/setup'));
 
-  /// Run first-run setup. Succeeds once; afterwards the Server answers 409.
   Future<void> runSetup(Map<String, dynamic> configuration) async {
     await _send('POST', '/api/setup', body: configuration);
   }
 
-  /// Add a satellite by catalog number.
-  ///
-  /// The Server fetches orbital data first and stores nothing if no provider
-  /// has any, so a satellite in the catalogue is always trackable
-  /// (spec.md section 11.1).
   Future<Satellite> addSatellite({required int noradId, String? name}) async {
     final response = await _send(
       'POST',
@@ -374,7 +330,6 @@ class ApiClient {
     final response = await _send(
       'PATCH',
       '/api/satellites/$id',
-      // An absent field is left unchanged by the Server.
       body: {
         'name': ?name,
         'description': ?description,
@@ -384,8 +339,6 @@ class ApiClient {
     return Satellite.fromJson(response);
   }
 
-  /// Remove a satellite. Refused while passes reference it, because history
-  /// is never quietly dropped.
   Future<void> deleteSatellite(String id) async {
     await _send('DELETE', '/api/satellites/$id');
   }
@@ -397,9 +350,6 @@ class ApiClient {
   Future<StationConfig> stationConfig() async =>
       StationConfig.fromJson(await _send('GET', '/api/station/config'));
 
-  /// Change station identity, location or active band. The returned count is
-  /// the passes already committed under the previous settings, which the
-  /// Server leaves untouched (client-spec section 29).
   Future<int> updateStation(Map<String, dynamic> changes) async {
     final response = await _send('PATCH', '/api/station', body: changes);
     return (response['upcoming_passes_unchanged'] as num?)?.toInt() ?? 0;
@@ -422,8 +372,6 @@ class ApiClient {
     return (response['upcoming_passes_unchanged'] as num?)?.toInt() ?? 0;
   }
 
-  /// Save a new scheduling configuration version. It becomes effective after
-  /// the newly chosen lead time, which the Server decides and returns.
   Future<DateTime> updateSchedulingConfig(Map<String, dynamic> settings) async {
     final response = await _send(
       'PUT',
@@ -471,7 +419,6 @@ class ApiClient {
         .toList();
   }
 
-  // Health -----------------------------------------------------------------
 
   Future<bool> serverIsReachable() async {
     try {

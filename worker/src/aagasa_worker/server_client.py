@@ -19,9 +19,7 @@ from aagasa_worker.recordings import read_chunks
 logger = logging.getLogger(__name__)
 
 CALL_TIMEOUT_SECONDS = 10
-# A plan set is larger than a ping, so it gets longer.
 SYNC_TIMEOUT_SECONDS = 60
-# A recording can be large and the link can be slow.
 UPLOAD_TIMEOUT_SECONDS = 3600
 
 
@@ -30,19 +28,16 @@ class ServerClient:
 
     def __init__(self, config: Config):
         self._config = config
-        # Set once registration resolves it; empty until then.
         self.identity = None
         if config.server_tls_enabled:
             credentials = grpc.ssl_channel_credentials()
             self._channel = grpc.secure_channel(config.server_grpc_address, credentials)
         else:
-            # Only for local development; deployments set TLS enabled.
             logger.warning("server connection is not using TLS")
             self._channel = grpc.insecure_channel(config.server_grpc_address)
         self._stub = worker_pb2_grpc.WorkerServiceStub(self._channel)
 
     def _metadata(self):
-        # The credential is sent per call and must never be logged.
         return (("authorization", f"Bearer {self._config.server_shared_secret}"),)
 
     def register(self, worker_name: str, available_pipelines=()):

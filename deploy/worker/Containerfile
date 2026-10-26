@@ -1,11 +1,3 @@
-# Aagasa Worker: ground-station edge executor.
-# Built from the repository root: podman build -f deploy/worker/Containerfile .
-#
-# SatDump is installed from the distribution package placed at
-# deploy/worker/satdump.deb; it is not committed to the repository.
-#
-# The SatDump package is built against Ubuntu 22.04 libraries (libvolk 2.5,
-# libuhd 4.1), so the Worker base must match that ABI.
 FROM docker.io/library/ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
@@ -13,10 +5,6 @@ WORKDIR /app
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 COPY deploy/worker/satdump.deb /tmp/satdump.deb
-# rtl-sdr provides rtl_test, which the Worker uses to detect the radio.
-# The other libraries satisfy SatDump's optional plugin dependencies; without
-# them the plugin loader retries a partially-loaded plugin and aborts with
-# CLI::OptionAlreadyAdded.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates rtl-sdr ocl-icd-libopencl1 libtiff5 sqlite3 \
@@ -24,27 +12,17 @@ RUN apt-get update \
         /tmp/satdump.deb \
     && rm -rf /var/lib/apt/lists/* /tmp/satdump.deb
 
-# SatDump 2.x loads resources/, satdump_cfg.json and plugins/ relative to its
-# working directory. Stage the distribution files in one immutable runtime
-# tree instead of relying on the caller's cwd.
 RUN mkdir -p /opt/satdump-runtime \
     && cp -a /usr/share/satdump/resources /opt/satdump-runtime/resources \
     && cp -a /usr/share/satdump/satdump_cfg.json /opt/satdump-runtime/ \
     && ln -s /usr/lib/x86_64-linux-gnu/satdump/plugins /opt/satdump-runtime/plugins
 
 COPY worker /app
-# Jammy has Python 3.10, while the Worker requires 3.11. Install a managed
-# interpreter under /opt so the unprivileged runtime user can execute it.
 ENV UV_PYTHON_INSTALL_DIR=/opt/python
 RUN uv sync --frozen --no-dev
 
-# The Worker needs the dialout group for the rotator serial port.
 RUN useradd --system --uid 10003 --groups dialout --create-home aagasa
 
-# SatDump 2.0-alpha tries to refresh IERS data from a URL that now answers 400,
-# and crashes on the HTML response. Seed a valid local database with a future
-# update timestamp so startup stays offline; the constant Earth-orientation
-# values are accurate enough for satellite tracking.
 RUN mkdir -p /home/aagasa/.config/satdump \
     && sqlite3 /home/aagasa/.config/satdump/main.db "\
 CREATE TABLE IF NOT EXISTS meta(id TEXT PRIMARY KEY NOT NULL,val TEXT NOT NULL); \
@@ -58,16 +36,11 @@ INSERT OR REPLACE INTO iers(time,a_pole_x,a_pole_y,ut1_utc) SELECT mjd,0.05,0.35
 INSERT OR REPLACE INTO leap_seconds(time,leap_seconds) VALUES(57754,37);" \
     && chown -R aagasa:aagasa /home/aagasa
 
-# Plugin-to-plugin dependencies (libfirstparty_loader_support -> 
-# libfirstparty_support) are not on the system linker path.
 ENV LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/satdump/plugins
 ENV HOME=/home/aagasa
 WORKDIR /opt/satdump-runtime
 
 USER aagasa
 
-# Run the console script from the built virtualenv directly: `uv run` would
-# re-sync at every start and needs a writable cache/home, which this user has
-# no reason to have.
 ENV PATH="/app/.venv/bin:$PATH"
 CMD ["aagasa-worker"]

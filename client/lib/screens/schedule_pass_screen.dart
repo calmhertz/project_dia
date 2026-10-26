@@ -8,10 +8,6 @@ import '../widgets/formatting.dart';
 import '../widgets/pipeline_upload.dart';
 import 'satellites_screen.dart' show describeError;
 
-/// Review a pass and request it.
-///
-/// The flow is deliberately staged rather than one dense form
-/// (client-spec section 11).
 class SchedulePassScreen extends StatefulWidget {
   const SchedulePassScreen({
     super.key,
@@ -41,14 +37,9 @@ class _SchedulePassScreenState extends State<SchedulePassScreen> {
   @override
   void initState() {
     super.initState();
-    // Loaded up front: choosing a decode mode without knowing what the
-    // station can run would be a dead end (client-spec section 12).
     _pipelines = context.read<Session>().api.pipelines()..ignore();
   }
 
-  /// spec.md section 19.1: a pass may use a standard pipeline or a custom
-  /// JSON supplied here. The uploaded one is selected straight away, because
-  /// uploading it is how it was chosen.
   Future<void> _useUploadedPipeline() async {
     final uploaded = await UploadPipelineDialog.show(context);
     if (uploaded == null || !mounted) return;
@@ -61,8 +52,6 @@ class _SchedulePassScreenState extends State<SchedulePassScreen> {
   bool get _needsPipeline =>
       _recordingMode == 'process' || _recordingMode == 'raw_and_process';
 
-  /// A band mismatch is a warning, never a reason to block the request
-  /// (spec.md section 8).
   bool get _bandMismatch =>
       widget.stationBand.isNotEmpty && _band != widget.stationBand;
 
@@ -101,8 +90,6 @@ class _SchedulePassScreenState extends State<SchedulePassScreen> {
     }
   }
 
-  /// A Root override cancels somebody else's booked pass, so it is confirmed
-  /// in those words rather than as a retry.
   Future<void> _confirmOverride() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -206,9 +193,6 @@ class _SchedulePassScreenState extends State<SchedulePassScreen> {
           if (_failure != null) ...[
             const SizedBox(height: 16),
             _FailureCard(failure: _failure!),
-            // Root may take an occupied slot, which cancels the passes in the
-            // way. Offered only after a conflict, and never for lead time,
-            // which binds Root too (spec.md section 13.7).
             if (_failure!.isStationConflict &&
                 (context.watch<Session>().user?.isRoot ?? false)) ...[
               const SizedBox(height: 12),
@@ -362,10 +346,6 @@ class _WarningCard extends StatelessWidget {
   }
 }
 
-/// A refused request, explained in the terms the user needs.
-///
-/// A conflict says the slot is taken and nothing about who holds it
-/// (client-spec section 15).
 class _FailureCard extends StatelessWidget {
   const _FailureCard({required this.failure});
 
@@ -437,11 +417,6 @@ class _FailureCard extends StatelessWidget {
   }
 }
 
-/// Which SatDump pipeline decodes the pass.
-///
-/// The list is the station's own installation plus any custom definitions an
-/// operator uploaded. Nothing here invents a pipeline from a satellite name
-/// (spec.md section 19.1).
 class _PipelineChoice extends StatelessWidget {
   const _PipelineChoice({
     required this.future,
@@ -479,7 +454,6 @@ class _PipelineChoice extends StatelessWidget {
 
             final catalogue = snapshot.data!;
             if (catalogue.pipelines.isEmpty) {
-              // Nothing standard to choose does not rule out a custom one.
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -533,8 +507,6 @@ class _PipelineChoice extends StatelessWidget {
   }
 }
 
-/// The custom-JSON route, offered wherever a pipeline is chosen rather than
-/// hidden in administration (client-spec section 12).
 class _UploadButton extends StatelessWidget {
   const _UploadButton({required this.onUploaded});
 

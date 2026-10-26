@@ -7,11 +7,6 @@ import '../../widgets/formatting.dart';
 import '../../widgets/states.dart';
 import '../satellites_screen.dart' show describeError;
 
-/// Station and Worker status, and the scheduling rules in force.
-///
-/// Operational facts only: nothing here names a transport, a datastore or a
-/// container (client-spec section 4). Admin reads the scheduling rules;
-/// changing them is Root's, in V15.
 class OperationsScreen extends StatefulWidget {
   const OperationsScreen({super.key});
 
@@ -180,7 +175,6 @@ class _WorkerCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                // Icon and words, never colour alone (client-spec section 32).
                 Icon(
                   worker.isOnline ? Icons.link : Icons.link_off,
                   color: worker.isOnline ? colours.primary : colours.error,

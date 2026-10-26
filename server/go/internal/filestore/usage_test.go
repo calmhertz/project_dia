@@ -8,8 +8,6 @@ import (
 	"aagasa/internal/filestore"
 )
 
-// A ground station fills its disk with recordings and nothing else, so the
-// Server has to refuse before a write fails halfway through.
 
 func TestUsageReportsTheRecordingFilesystem(t *testing.T) {
 	store, err := filestore.New(t.TempDir(), t.TempDir())
@@ -38,23 +36,19 @@ func TestSpaceIsRefusedForAWriteThatWouldNotFit(t *testing.T) {
 		t.Fatalf("new store: %v", err)
 	}
 
-	// A write far larger than any disk cannot be satisfied.
 	err = store.EnsureSpaceFor(math.MaxInt64 / 2)
 	if !errors.Is(err, filestore.ErrNoSpace) {
 		t.Fatalf("EnsureSpaceFor(huge) = %v, want ErrNoSpace", err)
 	}
-	// The message has to say how short it is, or an operator cannot act.
 	if err.Error() == "" || len(err.Error()) < len("not enough free space") {
 		t.Errorf("message = %q", err.Error())
 	}
 
-	// A small write on a working filesystem is fine.
 	if err := store.EnsureSpaceFor(1024); err != nil {
 		t.Errorf("EnsureSpaceFor(1 KiB) = %v, want nil", err)
 	}
 }
 
-// A negative size is nonsense, and must not be treated as free headroom.
 func TestNegativeSizeIsTreatedAsZero(t *testing.T) {
 	store, err := filestore.New(t.TempDir(), t.TempDir())
 	if err != nil {
@@ -65,8 +59,6 @@ func TestNegativeSizeIsTreatedAsZero(t *testing.T) {
 	}
 }
 
-// Being unable to measure must not stop uploads: the write itself will fail
-// if it must, and refusing everything over a failed measurement is worse.
 func TestAnUnmeasurableFilesystemDoesNotRefuseWrites(t *testing.T) {
 	store, err := filestore.New(t.TempDir()+"/gone", t.TempDir())
 	if err != nil {

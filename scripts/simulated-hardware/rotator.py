@@ -20,10 +20,6 @@ import signal
 import sys
 import time
 
-# The Worker sends "W<azimuth:04d> <elevation:03d>\r" and reads no reply; the
-# G-550 has no position readback in the reference implementation. Getting this
-# width wrong is not harmless: the stand-in silently logs every real command as
-# unrecognised and the pointing it is meant to prove goes unrecorded.
 MOVE = re.compile(rb"^W(\d{4}) (\d{3})\r$")
 
 
@@ -37,7 +33,6 @@ def main() -> int:
     primary, secondary = pty.openpty()
     device = os.ttyname(secondary)
 
-    # A stable path, so configuration does not change every run.
     link = arguments.link
     try:
         if os.path.islink(link) or os.path.exists(link):

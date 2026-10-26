@@ -20,7 +20,6 @@ from aagasa_worker.hardware.errors import RotatorError
 
 logger = logging.getLogger(__name__)
 
-# spec.md section 9: the G-550 accepts these ranges and no others.
 MIN_AZIMUTH = 0
 MAX_AZIMUTH = 359
 MIN_ELEVATION = 0
@@ -55,13 +54,9 @@ class G550Rotator:
                  serial_factory=serial.Serial):
         self._port = port
         self._baud_rate = baud_rate
-        # serial_factory is injected so tests can drive a loopback transport.
         self._serial_factory = serial_factory
         self._lock = threading.Lock()
 
-        # Validate the park position once, at construction: a station
-        # configured with an impossible safe position is a setup error, not
-        # something to discover during recovery.
         self._park_azimuth = self._require_azimuth(park_azimuth)
         self._park_elevation = self._require_elevation(park_elevation)
 
@@ -124,8 +119,6 @@ class G550Rotator:
             raise RotatorError(f"rotator port {self._port} unavailable: {error}") from error
 
     def _send(self, command: str) -> None:
-        # One command at a time: overlapping writes would interleave bytes on
-        # the wire and could drive the antenna somewhere unintended.
         with self._lock:
             try:
                 with self._serial_factory(

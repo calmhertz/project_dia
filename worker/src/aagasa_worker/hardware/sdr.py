@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 PROBE_TIMEOUT_SECONDS = 15
 
-# rtl_test lists devices on stderr as "  0:  Realtek, RTL2838UHIDIR, SN: ...".
 _DEVICE_LINE = re.compile(r"^\s*(\d+):\s+(.+)$")
 _NO_DEVICES = "no supported devices found"
 
@@ -37,8 +36,6 @@ class RTLSDRProbe:
             completed = subprocess.run(
                 [self._binary, "-t"],
                 capture_output=True,
-                # rtl_test writes terminal control bytes that are not valid
-                # UTF-8; decoding must never take the Worker down.
                 encoding="utf-8", errors="replace",
                 timeout=PROBE_TIMEOUT_SECONDS,
                 check=False,
@@ -52,9 +49,6 @@ class RTLSDRProbe:
         lowered = output.lower()
         if _NO_DEVICES in lowered:
             return []
-        # libusb can enumerate the host device through sysfs even when the
-        # container has no permission to open it. Treat that as absent so the
-        # Worker never claims a radio it cannot actually use.
         if "usb_open error" in lowered or "failed to open rtlsdr device" in lowered:
             return []
 

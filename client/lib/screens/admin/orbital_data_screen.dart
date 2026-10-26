@@ -7,11 +7,6 @@ import '../../widgets/formatting.dart';
 import '../../widgets/states.dart';
 import '../satellites_screen.dart' show describeError;
 
-/// Orbital data freshness across the catalogue, and the refresh an Admin may
-/// run.
-///
-/// A refresh that fails keeps the previous data rather than discarding it
-/// (spec.md section 11.1), so the result is reported in those terms.
 class OrbitalDataScreen extends StatefulWidget {
   const OrbitalDataScreen({super.key});
 
@@ -160,7 +155,6 @@ class _EntryTile extends StatelessWidget {
     final theme = Theme.of(context);
     final colours = theme.colorScheme;
 
-    // Missing and stale are different problems and are shown as such.
     final (IconData icon, Color colour, String detail) = switch (entry) {
       TleStatusEntry(hasOrbitalData: false) => (
         Icons.help_outline,

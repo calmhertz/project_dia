@@ -5,8 +5,6 @@ The Worker must retry a missing Server without tight-looping
 """
 
 MIN_DELAY_SECONDS = 5
-# Capped at a minute: a station that waited five minutes to notice the Server
-# had returned would look broken to an operator who just restarted it.
 MAX_DELAY_SECONDS = 60
 
 

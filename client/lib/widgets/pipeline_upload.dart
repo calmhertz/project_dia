@@ -8,17 +8,9 @@ import '../models/models.dart';
 import '../screens/satellites_screen.dart' show describeError;
 import '../state/session.dart';
 
-/// Upload a custom SatDump pipeline (spec.md section 19.1, client-spec
-/// section 12).
-///
-/// A file is chosen or the JSON is pasted; the client checks only the obvious
-/// things - that it is a file of plausible size and parses as JSON - and lets
-/// the Server be the authority on whether the definition is usable. There is
-/// no pipeline editor, deliberately.
 class UploadPipelineDialog extends StatefulWidget {
   const UploadPipelineDialog({super.key});
 
-  /// Returns the pipeline the Server accepted, or null if cancelled.
   static Future<SatDumpPipeline?> show(BuildContext context) {
     return showDialog<SatDumpPipeline>(
       context: context,
@@ -31,8 +23,6 @@ class UploadPipelineDialog extends StatefulWidget {
 }
 
 class _UploadPipelineDialogState extends State<UploadPipelineDialog> {
-  /// A pipeline definition is a small text file; anything larger is a
-  /// mistake, and the Server refuses it too.
   static const int _maxBytes = 256 * 1024;
 
   final _name = TextEditingController();
@@ -81,7 +71,6 @@ class _UploadPipelineDialogState extends State<UploadPipelineDialog> {
       _definition.text = text;
       _failure = null;
       if (_name.text.trim().isEmpty) {
-        // A sensible default the operator can overwrite.
         _name.text = file.name.replaceAll(RegExp(r'\.json$'), '');
       }
     });
@@ -96,8 +85,6 @@ class _UploadPipelineDialogState extends State<UploadPipelineDialog> {
       setState(() => _failure = 'Choose a file or paste the pipeline JSON.');
       return;
     }
-    // A local parse catches the common mistake immediately; the Server still
-    // decides whether the structure is acceptable.
     try {
       jsonDecode(_definition.text);
     } on FormatException catch (error) {

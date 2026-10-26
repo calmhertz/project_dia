@@ -33,8 +33,6 @@ class IdentityResolver:
         self._client = client
         self._store = store
         self._worker_name = worker_name
-        # Callable rather than a list: SatDump can be reinstalled while the
-        # Worker runs, and registration happens again after every outage.
         self._pipelines = pipelines or (lambda: [])
         self._identity = store.load_identity() or UNRESOLVED
         if self._identity.resolved:

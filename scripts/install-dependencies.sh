@@ -1,17 +1,4 @@
 #!/usr/bin/env bash
-# Install everything Aagasa needs, on Ubuntu/Debian or Fedora.
-#
-#   scripts/install-dependencies.sh            # everything
-#   scripts/install-dependencies.sh --server   # control plane only
-#   scripts/install-dependencies.sh --worker   # ground station only
-#   scripts/install-dependencies.sh --check    # report, install nothing
-#
-# It asks for sudo only for the distribution packages. Language toolchains go
-# under $HOME, because a station should not need a package maintainer's
-# permission to run a supported Go version.
-#
-# What it cannot do: SatDump is not in either distribution's repositories and
-# is not ours to redistribute. It is reported and pointed at, never guessed.
 
 set -uo pipefail
 
@@ -28,10 +15,6 @@ for argument in "$@"; do
     esac
 done
 
-# Versions ---------------------------------------------------------------------
-#
-# Pinned to what the project is actually built and tested with. Raising one is
-# a deliberate change, not something that happens because a mirror moved on.
 GO_VERSION=1.27.0
 FLUTTER_CHANNEL=stable
 MINIMUM_PYTHON=3.11
@@ -51,7 +34,6 @@ die()  { printf 'install: %s\n' "$1" >&2; exit 1; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# Distribution -----------------------------------------------------------------
 
 detect_distribution() {
     [ -r /etc/os-release ] || die "cannot read /etc/os-release; unsupported system"
@@ -100,7 +82,6 @@ install_packages() {
     for package in "${wanted[@]}"; do did "$package"; done
 }
 
-# Distribution packages ---------------------------------------------------------
 
 say "Base tools"
 if [ "$PACKAGE_MANAGER" = apt ]; then
@@ -112,12 +93,7 @@ else
 fi
 
 say "Containers"
-# Podman runs the datastores in development and the whole deployment in
-# production (spec.md section 24).
 install_packages podman
-# Rootless podman needs subuid/subgid ranges; without them every container
-# fails with a mapping error that reads like a permissions bug. Checked even
-# in check mode, because it is exactly the sort of thing that is missing.
 if grep -q "^$USER:" /etc/subuid 2>/dev/null; then
     ok "rootless container id ranges"
 elif $CHECK_ONLY; then
@@ -130,8 +106,6 @@ else
 fi
 
 say "Protocol buffers"
-# The deploy script's proto command regenerates the Go and Python stubs; the
-# compiler comes from the distribution, the language plugins from Go.
 if [ "$PACKAGE_MANAGER" = apt ]; then
     install_packages protobuf-compiler
 else
@@ -155,15 +129,12 @@ fi
 
 if [ "$ROLE" != server ]; then
     say "Ground station hardware"
-    # rtl_test enumerates the dongle; the Worker shells out to it by name.
     if [ "$PACKAGE_MANAGER" = apt ]; then
         install_packages rtl-sdr librtlsdr-dev
     else
         install_packages rtl-sdr rtl-sdr-devel
     fi
 
-    # The rotator is a USB serial device; without group membership the Worker
-    # cannot open it and reports the port as unavailable.
     if id -nG "$USER" | tr ' ' '\n' | grep -qx dialout; then
         ok "$USER is in the dialout group"
     elif $CHECK_ONLY; then
@@ -174,8 +145,6 @@ if [ "$ROLE" != server ]; then
             || note "could not add $USER to dialout; the serial port will not open"
     fi
 
-    # The dongle is claimed by the DVB-T kernel driver on a stock system, which
-    # stops SatDump from opening it at all.
     blacklist=/etc/modprobe.d/aagasa-rtlsdr.conf
     if [ -f "$blacklist" ]; then
         ok "dvb_usb_rtl28xxu blacklisted"
@@ -189,7 +158,6 @@ if [ "$ROLE" != server ]; then
     fi
 fi
 
-# Toolchains under $HOME ---------------------------------------------------------
 
 say "Go $GO_VERSION"
 if have go && [ "$(go env GOVERSION 2>/dev/null)" = "go$GO_VERSION" ]; then
@@ -223,8 +191,6 @@ if have uv; then
 elif $CHECK_ONLY; then
     gap "uv"
 else
-    # uv manages both Python projects and will fetch a suitable interpreter
-    # itself if the system one is too old.
     curl -fsSL https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 \
         && did "uv in $LOCAL_BIN" || die "could not install uv"
 fi
@@ -246,8 +212,6 @@ if [ "$ROLE" != worker ]; then
             || die "could not clone Flutter"
     fi
 
-    # Building the Linux desktop target needs these; the web build does not.
-    # Installed anyway so `flutter doctor` is clean and either target works.
     say "Flutter Linux build tools"
     if [ "$PACKAGE_MANAGER" = apt ]; then
         install_packages clang cmake ninja-build libgtk-3-dev liblzma-dev
@@ -256,7 +220,6 @@ if [ "$ROLE" != worker ]; then
     fi
 fi
 
-# Go-installed protobuf plugins --------------------------------------------------
 
 say "Protobuf plugins"
 export PATH="$GO_ROOT/bin:$HOME/go/bin:$LOCAL_BIN:$PATH"
@@ -273,13 +236,10 @@ else
     gap "protoc-gen-go (needs Go on PATH)"
 fi
 
-# SatDump ------------------------------------------------------------------------
 
 if [ "$ROLE" != server ]; then
     say "SatDump"
     if have satdump; then
-        # SatDump has no --version flag and answers with a usage error, so
-        # report where it is rather than inventing a version string.
         ok "satdump at $(command -v satdump)"
     else
         gap "satdump"
@@ -295,7 +255,6 @@ if [ "$ROLE" != server ]; then
     fi
 fi
 
-# PATH -----------------------------------------------------------------------------
 
 if ! $CHECK_ONLY; then
     say "PATH"
@@ -316,7 +275,6 @@ if ! $CHECK_ONLY; then
     fi
 fi
 
-# Verify --------------------------------------------------------------------------
 
 say "Summary"
 printf '   already present: %d\n' "${#SKIPPED[@]}"

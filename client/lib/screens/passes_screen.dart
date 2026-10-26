@@ -8,11 +8,9 @@ import '../widgets/states.dart';
 import 'pass_detail_screen.dart';
 import 'satellites_screen.dart' show describeError;
 
-/// A list of passes: the user's own, or the public history.
 class PassesScreen extends StatefulWidget {
   const PassesScreen({super.key, required this.scope});
 
-  /// `mine` for the user's own passes, `public` for shared history.
   final String scope;
 
   @override
@@ -33,8 +31,6 @@ class _PassesScreenState extends State<PassesScreen> {
     final api = context.read<Session>().api;
     setState(() {
       _future = () async {
-        // Names come from the catalogue, so a pass row reads as a satellite
-        // rather than an identifier.
         final results = await Future.wait([
           api.passes(scope: widget.scope),
           api.satellites(),
@@ -75,7 +71,6 @@ class _PassesScreenState extends State<PassesScreen> {
           );
         }
 
-        // Soonest first for upcoming work, most recent first for history.
         final ordered = [...passes]
           ..sort(
             (a, b) =>

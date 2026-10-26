@@ -19,8 +19,6 @@ import (
 	"aagasa/internal/testsupport"
 )
 
-// The scheduler is tested without the Worker or any hardware, which is the
-// V7 exit criterion.
 
 const argon2idHash = "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHR2YWx1ZQ$aGFzaHZhbHVlaGFzaHZhbHVlaGFzaHZhbA"
 
@@ -31,8 +29,6 @@ const (
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewJSONHandler(io.Discard, nil)) }
 
-// fakePredictor returns scripted passes, so scheduling is tested without
-// depending on the prediction service being up.
 type fakePredictor struct {
 	mu     sync.Mutex
 	passes []prediction.Pass
@@ -47,7 +43,6 @@ func (f *fakePredictor) PredictPasses(ctx context.Context, request prediction.Re
 	if f.err != nil {
 		return prediction.Result{}, f.err
 	}
-	// Mimic the real service: return only passes inside the search window.
 	var inWindow []prediction.Pass
 	for _, candidate := range f.passes {
 		if !candidate.AOS.Before(request.SearchStart) && !candidate.AOS.After(request.SearchEnd) {
@@ -65,7 +60,6 @@ func passAt(aos time.Time, duration time.Duration) prediction.Pass {
 	}
 }
 
-// world is a fully configured station with everything a pass needs.
 type world struct {
 	repo      *store.Repository
 	service   *scheduling.Service
@@ -120,7 +114,6 @@ func newWorld(t *testing.T, leadTime time.Duration) *world {
 		PrePassBuffer: 2 * time.Minute, PostPassBuffer: 2 * time.Minute,
 		RecordingPreRoll: 10 * time.Second, RecordingPostRoll: 10 * time.Second,
 		MinimumElevationDegrees: 10,
-		// Already effective, so scheduling can happen immediately.
 		EffectiveFrom: time.Now().UTC().Add(-time.Hour),
 	})
 	if err != nil {
@@ -169,7 +162,6 @@ func (w *world) request(actor domain.User, aos time.Time) scheduling.RequestInpu
 	}
 }
 
-// Requesting ---------------------------------------------------------------
 
 func TestRequestPassCreatesAPendingPass(t *testing.T) {
 	ctx := context.Background()
@@ -189,20 +181,17 @@ func TestRequestPassCreatesAPendingPass(t *testing.T) {
 	if result.Pass.RequestedBy != w.user.ID {
 		t.Error("pass is not attributed to the requester")
 	}
-	// The reservation is the pass widened by the configured buffers.
 	if !result.Pass.ReservedFrom.Equal(aos.Add(-2 * time.Minute)) {
 		t.Errorf("ReservedFrom = %s, want AOS minus 2m", result.Pass.ReservedFrom)
 	}
 	if !result.Pass.ReservedTo.Equal(aos.Add(12 * time.Minute)) {
 		t.Errorf("ReservedTo = %s, want LOS plus 2m", result.Pass.ReservedTo)
 	}
-	// Recording margins are separate from the reservation buffers.
 	if result.Pass.RecordingPreRoll != 10*time.Second {
 		t.Errorf("RecordingPreRoll = %v, want 10s", result.Pass.RecordingPreRoll)
 	}
 }
 
-// The Server computes pass timings; a client cannot dictate them.
 func TestClientSuppliedTimingIsNotTrusted(t *testing.T) {
 	ctx := context.Background()
 	w := newWorld(t, 30*time.Minute)
@@ -210,8 +199,6 @@ func TestClientSuppliedTimingIsNotTrusted(t *testing.T) {
 	realAOS := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
 	w.predictor.passes = []prediction.Pass{passAt(realAOS, 10*time.Minute)}
 
-	// Ask using a time a little off from the real pass; within tolerance it
-	// still resolves, but to the predicted numbers.
 	result, err := w.service.RequestPass(ctx, w.user, w.request(w.user, realAOS.Add(30*time.Second)))
 	if err != nil {
 		t.Fatalf("RequestPass: %v", err)
@@ -228,7 +215,6 @@ func TestRequestingAPassThatDoesNotExistIsRefused(t *testing.T) {
 		passAt(time.Now().UTC().Add(4*time.Hour), 10*time.Minute),
 	}
 
-	// Hours away from any predicted pass.
 	_, err := w.service.RequestPass(ctx, w.user, w.request(w.user, time.Now().UTC().Add(10*time.Hour)))
 	if !errors.Is(err, scheduling.ErrPassNotFound) {
 		t.Errorf("error = %v, want ErrPassNotFound", err)
@@ -250,16 +236,12 @@ func TestUnschedulableSatelliteIsRefused(t *testing.T) {
 	}
 }
 
-// Overlap ------------------------------------------------------------------
 
-// spec.md section 13.3: any overlap on the same station conflicts, whatever
-// the satellite, band or user.
 func TestOverlappingRequestIsRejected(t *testing.T) {
 	ctx := context.Background()
 	w := newWorld(t, 30*time.Minute)
 
 	first := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
-	// 10:00-10:15 and 10:10-10:20, the spec's example.
 	w.predictor.passes = []prediction.Pass{
 		passAt(first, 15*time.Minute),
 		passAt(first.Add(10*time.Minute), 10*time.Minute),
@@ -269,13 +251,11 @@ func TestOverlappingRequestIsRejected(t *testing.T) {
 		t.Fatalf("first request: %v", err)
 	}
 
-	// A different user, and it still conflicts: the station is one resource.
 	_, err := w.service.RequestPass(ctx, w.other, w.request(w.other, first.Add(10*time.Minute)))
 	if !errors.Is(err, scheduling.ErrStationConflict) {
 		t.Fatalf("error = %v, want ErrStationConflict", err)
 	}
 
-	// The conflict message exposes the occupied window and nothing else.
 	var conflict *scheduling.ConflictError
 	if !errors.As(err, &conflict) {
 		t.Fatalf("error is not a ConflictError: %v", err)
@@ -285,8 +265,6 @@ func TestOverlappingRequestIsRejected(t *testing.T) {
 	}
 }
 
-// spec.md section 15 and global test property 14: a conflict must not reveal
-// the other user.
 func TestConflictDoesNotLeakTheOtherUser(t *testing.T) {
 	ctx := context.Background()
 	w := newWorld(t, 30*time.Minute)
@@ -315,7 +293,6 @@ func TestNonOverlappingPassesAreBothAccepted(t *testing.T) {
 	w := newWorld(t, 30*time.Minute)
 
 	first := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
-	// Second pass starts well after the first reservation ends.
 	second := first.Add(40 * time.Minute)
 	w.predictor.passes = []prediction.Pass{
 		passAt(first, 10*time.Minute), passAt(second, 10*time.Minute),
@@ -329,7 +306,6 @@ func TestNonOverlappingPassesAreBothAccepted(t *testing.T) {
 	}
 }
 
-// Global test property 2: concurrency cannot bypass the conflict rule.
 func TestConcurrentRequestsCannotRaceThroughTheConflictCheck(t *testing.T) {
 	ctx := context.Background()
 	w := newWorld(t, 30*time.Minute)
@@ -372,7 +348,6 @@ func TestConcurrentRequestsCannotRaceThroughTheConflictCheck(t *testing.T) {
 	}
 }
 
-// Lead time ----------------------------------------------------------------
 
 func TestLeadTimeBlocksAPassStartingTooSoon(t *testing.T) {
 	ctx := context.Background()
@@ -386,7 +361,6 @@ func TestLeadTimeBlocksAPassStartingTooSoon(t *testing.T) {
 	}
 }
 
-// Global test property 4: Root does not get to skip the lead-time rule.
 func TestRootCannotBypassTheLeadTime(t *testing.T) {
 	ctx := context.Background()
 	w := newWorld(t, 2*time.Hour)
@@ -397,18 +371,15 @@ func TestRootCannotBypassTheLeadTime(t *testing.T) {
 	if _, err := w.service.RequestPass(ctx, w.root, w.request(w.root, soon)); !errors.Is(err, scheduling.ErrLeadTime) {
 		t.Errorf("root plain request error = %v, want ErrLeadTime", err)
 	}
-	// Not even through the override path, which bypasses conflicts only.
 	if _, err := w.service.RequestPassWithRootOverride(ctx, w.root, w.request(w.root, soon)); !errors.Is(err, scheduling.ErrLeadTime) {
 		t.Errorf("root override error = %v, want ErrLeadTime", err)
 	}
 }
 
-// Global test property 5: changing the lead time cannot bypass the wait.
 func TestShortenedLeadTimeIsNotUsableImmediately(t *testing.T) {
 	ctx := context.Background()
 	w := newWorld(t, 4*time.Hour)
 
-	// Root shortens the lead time to five minutes.
 	saved, err := w.service.UpdateSchedulingConfig(ctx, w.root, domain.SchedulingConfig{
 		MinimumLeadTime: 5 * time.Minute,
 		PrePassBuffer:   2 * time.Minute, PostPassBuffer: 2 * time.Minute,
@@ -422,8 +393,6 @@ func TestShortenedLeadTimeIsNotUsableImmediately(t *testing.T) {
 		t.Error("the new configuration became effective immediately")
 	}
 
-	// A pass 30 minutes out would be legal under the new value but not the
-	// old one, and the old one is still in force.
 	soon := time.Now().UTC().Add(30 * time.Minute)
 	w.predictor.passes = []prediction.Pass{passAt(soon, 10*time.Minute)}
 
@@ -446,7 +415,6 @@ func TestOnlyRootCanChangeSchedulingConfiguration(t *testing.T) {
 	}
 }
 
-// Approval -----------------------------------------------------------------
 
 func TestAdminApprovesAndRejects(t *testing.T) {
 	ctx := context.Background()
@@ -470,7 +438,6 @@ func TestAdminApprovesAndRejects(t *testing.T) {
 		t.Error("the approver is not recorded")
 	}
 
-	// Approving twice is refused by the state machine.
 	if _, err := w.service.Approve(ctx, w.admin, result.Pass.ID); err == nil {
 		t.Error("approving an approved pass must be refused")
 	}
@@ -487,7 +454,6 @@ func TestNormalUserCannotApprove(t *testing.T) {
 		t.Fatalf("RequestPass: %v", err)
 	}
 
-	// Not even their own pass.
 	if _, err := w.service.Approve(ctx, w.user, result.Pass.ID); !errors.Is(err, scheduling.ErrForbidden) {
 		t.Errorf("error = %v, want ErrForbidden", err)
 	}
@@ -508,13 +474,11 @@ func TestRejectedPassReleasesTheStation(t *testing.T) {
 		t.Fatalf("Reject: %v", err)
 	}
 
-	// The slot is free again.
 	if _, err := w.service.RequestPass(ctx, w.other, w.request(w.other, aos)); err != nil {
 		t.Errorf("slot not released after rejection: %v", err)
 	}
 }
 
-// Cancellation -------------------------------------------------------------
 
 func TestOwnerCancelsAndSlotIsReleased(t *testing.T) {
 	ctx := context.Background()
@@ -560,9 +524,7 @@ func TestStrangerCannotCancelSomeoneElsesPass(t *testing.T) {
 	}
 }
 
-// Root override ------------------------------------------------------------
 
-// Global test property 6 and spec.md section 13.7.
 func TestRootOverrideCancelsTheConflictingPassAndKeepsItAuditable(t *testing.T) {
 	ctx := context.Background()
 	w := newWorld(t, 30*time.Minute)
@@ -583,7 +545,6 @@ func TestRootOverrideCancelsTheConflictingPassAndKeepsItAuditable(t *testing.T) 
 		t.Fatalf("RequestPassWithRootOverride: %v", err)
 	}
 
-	// Root's pass is live and already approved.
 	if result.Pass.Status != domain.PassApproved {
 		t.Errorf("root pass status = %s, want approved", result.Pass.Status)
 	}
@@ -591,7 +552,6 @@ func TestRootOverrideCancelsTheConflictingPassAndKeepsItAuditable(t *testing.T) 
 		t.Errorf("overridden = %v, want the first pass", result.OverriddenPassIDs)
 	}
 
-	// The displaced pass still exists, cancelled with the override reason.
 	displaced, err := w.repo.GetPassByID(ctx, victim.Pass.ID)
 	if err != nil {
 		t.Fatalf("the overridden pass was deleted: %v", err)
@@ -604,7 +564,6 @@ func TestRootOverrideCancelsTheConflictingPassAndKeepsItAuditable(t *testing.T) 
 		t.Errorf("displaced reason = %v, want cancelled_by_root_override", displaced.CancellationReason)
 	}
 
-	// And it is auditable.
 	count, err := w.repo.CountAuditRecords(ctx, "pass", victim.Pass.ID.String())
 	if err != nil {
 		t.Fatalf("CountAuditRecords: %v", err)
@@ -644,9 +603,7 @@ func TestRootOverrideWithNoConflictJustSchedules(t *testing.T) {
 	}
 }
 
-// Worker availability ------------------------------------------------------
 
-// spec.md section 6.3 and global test property 12.
 func TestOfflineWorkerBlocksNewScheduling(t *testing.T) {
 	ctx := context.Background()
 	w := newWorld(t, 30*time.Minute)
@@ -661,14 +618,11 @@ func TestOfflineWorkerBlocksNewScheduling(t *testing.T) {
 	if _, err := w.service.RequestPass(ctx, w.user, w.request(w.user, aos)); !errors.Is(err, scheduling.ErrWorkerOffline) {
 		t.Errorf("error = %v, want ErrWorkerOffline", err)
 	}
-	// Root is not exempt: the station genuinely cannot execute.
 	if _, err := w.service.RequestPassWithRootOverride(ctx, w.root, w.request(w.root, aos)); !errors.Is(err, scheduling.ErrWorkerOffline) {
 		t.Errorf("root override error = %v, want ErrWorkerOffline", err)
 	}
 }
 
-// Global test property 13: switching the station band must not destroy
-// existing approved passes.
 func TestChangingTheStationBandDoesNotDisturbApprovedPasses(t *testing.T) {
 	ctx := context.Background()
 	w := newWorld(t, 30*time.Minute)
@@ -683,7 +637,6 @@ func TestChangingTheStationBandDoesNotDisturbApprovedPasses(t *testing.T) {
 		t.Fatalf("approve: %v", err)
 	}
 
-	// The station switches to the other band.
 	if err := w.repo.SetStationActiveBand(ctx, w.station.ID, domain.BandUHF); err != nil {
 		t.Fatalf("SetStationActiveBand: %v", err)
 	}
@@ -700,7 +653,6 @@ func TestChangingTheStationBandDoesNotDisturbApprovedPasses(t *testing.T) {
 	}
 }
 
-// A mismatch warns, it does not block (spec.md section 8).
 func TestBandMismatchWarnsButStillSchedules(t *testing.T) {
 	ctx := context.Background()
 	w := newWorld(t, 30*time.Minute)
@@ -708,7 +660,6 @@ func TestBandMismatchWarnsButStillSchedules(t *testing.T) {
 	aos := time.Now().UTC().Add(4 * time.Hour)
 	w.predictor.passes = []prediction.Pass{passAt(aos, 10*time.Minute)}
 
-	// The station is VHF; ask for a UHF pass.
 	input := w.request(w.user, aos)
 	input.Band = domain.BandUHF
 
@@ -724,7 +675,6 @@ func TestBandMismatchWarnsButStillSchedules(t *testing.T) {
 	}
 }
 
-// Prediction failure -------------------------------------------------------
 
 func TestPredictionOutageDoesNotCreateAPass(t *testing.T) {
 	ctx := context.Background()

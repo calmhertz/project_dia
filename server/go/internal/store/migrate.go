@@ -6,15 +6,13 @@ import (
 	"embed"
 	"fmt"
 
-	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for goose
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 )
 
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-// Migrations are applied by the aagasa-migrate command, never as a side effect
-// of starting the Server (RULES.md section 18).
 func newMigrationProvider(databaseURL string) (*sql.DB, error) {
 	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
@@ -28,7 +26,6 @@ func newMigrationProvider(databaseURL string) (*sql.DB, error) {
 	return db, nil
 }
 
-// MigrateUp applies every pending migration.
 func MigrateUp(ctx context.Context, databaseURL string) error {
 	db, err := newMigrationProvider(databaseURL)
 	if err != nil {
@@ -42,8 +39,6 @@ func MigrateUp(ctx context.Context, databaseURL string) error {
 	return nil
 }
 
-// MigrateDownTo rolls back to the given version. Intended for development and
-// for a deliberate rollback, not for routine operation.
 func MigrateDownTo(ctx context.Context, databaseURL string, version int64) error {
 	db, err := newMigrationProvider(databaseURL)
 	if err != nil {
@@ -57,7 +52,6 @@ func MigrateDownTo(ctx context.Context, databaseURL string, version int64) error
 	return nil
 }
 
-// MigrationVersion reports the currently applied schema version.
 func MigrationVersion(ctx context.Context, databaseURL string) (int64, error) {
 	db, err := newMigrationProvider(databaseURL)
 	if err != nil {

@@ -4,8 +4,6 @@ import 'package:provider/provider.dart';
 import '../state/session.dart';
 import '../theme/app_theme.dart';
 
-/// Sign-in. Deliberately plain: username, password, submit, clear errors
-/// (client-spec section 6).
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -131,9 +129,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
 
                   const SizedBox(height: 16),
-                  // There is no self-registration: a station operator creates
-                  // accounts (spec.md section 17). Saying so is kinder than
-                  // leaving someone hunting for a sign-up link.
                   Text(
                     'Accounts are created by a station administrator.',
                     textAlign: TextAlign.center,
@@ -167,7 +162,6 @@ class _ErrorBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Status is not carried by colour alone (client-spec section 32).
           Icon(Icons.error_outline, size: 20, color: colours.onErrorContainer),
           const SizedBox(width: 12),
           Expanded(

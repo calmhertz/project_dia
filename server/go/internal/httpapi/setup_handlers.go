@@ -14,9 +14,6 @@ type setupStatusResponse struct {
 	InitializedAt *time.Time `json:"initialized_at,omitempty"`
 }
 
-// handleSetupStatus lets the Client decide whether to show the setup flow. It
-// is available to any authenticated user because the UI needs it before roles
-// matter, and it discloses nothing beyond whether setup is done.
 func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 	at, err := s.repo.SystemInitializedAt(r.Context())
 	if err != nil {
@@ -62,12 +59,6 @@ type setupRequest struct {
 	WorkerName string `json:"worker_name"`
 }
 
-// handleSetup performs first-run configuration: station identity and location,
-// per-band RF settings, rotator and SDR settings, the initial scheduling
-// configuration, and the station's Worker (spec.md section 23).
-//
-// It runs once. Everything is written in one transaction so a partial setup
-// cannot be left behind.
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	actor := currentUser(r)
 	if !auth.CanRunFirstRunSetup(actor) {
@@ -134,8 +125,6 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		// The first configuration is effective immediately; there is no earlier
-		// policy for spec.md section 13.6's delay to protect.
 		if _, err := tx.CreateSchedulingConfig(r.Context(), domain.SchedulingConfig{
 			StationID:               station.ID,
 			MinimumLeadTime:         time.Duration(request.MinimumLeadTimeSeconds) * time.Second,
@@ -172,8 +161,6 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// validateSetup checks the request before any write. The database repeats most
-// of these checks; failing early gives the operator a usable message.
 func validateSetup(request *setupRequest) (string, bool) {
 	if strings.TrimSpace(request.StationName) == "" {
 		return "station_name is required", false
@@ -201,7 +188,6 @@ func validateSetup(request *setupRequest) (string, bool) {
 	if request.RotatorBaudRate <= 0 {
 		return "rotator_baud_rate must be positive", false
 	}
-	// spec.md section 9: the G-550 accepts these ranges and no others.
 	if request.RotatorParkAzimuthDegrees < 0 || request.RotatorParkAzimuthDegrees > 359 {
 		return "rotator_park_azimuth_degrees must be between 0 and 359", false
 	}

@@ -17,7 +17,6 @@ from skyfield.api import EarthSatellite, load, wgs84
 
 logger = logging.getLogger(__name__)
 
-# Skyfield's find_events labels: 0 rise, 1 culminate, 2 set.
 EVENT_RISE = 0
 EVENT_CULMINATE = 1
 EVENT_SET = 2
@@ -57,8 +56,6 @@ class Pass:
     track: list[TrackPoint] = field(default_factory=list)
 
 
-# One shared timescale: building it per request is wasteful and the builtin
-# data does not change at runtime.
 _timescale = load.timescale()
 
 
@@ -71,17 +68,11 @@ def build_satellite(line1: str, line2: str) -> EarthSatellite:
     except Exception as error:  # noqa: BLE001 - sgp4 raises assorted types
         raise PredictionError(f"invalid TLE: {error}") from error
 
-    # sgp4 reports element-set problems through a numeric error code rather
-    # than an exception, so a silently unusable satellite must be caught here.
-    # error_message is not present on every sgp4 build, hence the getattr.
     code = getattr(satellite.model, "error", 0)
     if code:
         detail = getattr(satellite.model, "error_message", "") or ""
         raise PredictionError(f"invalid TLE: sgp4 error {code} {detail}".strip())
 
-    # Note: sgp4 does not verify the TLE checksum, and neither does this
-    # service. Checksum validation happens once, on ingest, in the Server's
-    # Go tle package; duplicating it here would risk the two drifting apart.
     return satellite
 
 
@@ -115,8 +106,6 @@ def predict_passes(
     limit = max_passes if max_passes > 0 else DEFAULT_MAX_PASSES
     passes: list[Pass] = []
 
-    # find_events emits rise/culminate/set in order, but a search window can
-    # start mid-pass or end mid-pass, so only complete triples are usable.
     for index in range(len(events) - 2):
         if events[index] != EVENT_RISE:
             continue
@@ -162,7 +151,6 @@ def _build_track(difference, rise_time, set_time, step_seconds: int) -> list[Tra
     """
     duration = (set_time.tt - rise_time.tt) * 86400.0
     count = int(duration // step_seconds)
-    # Cap the sample count so an absurd request cannot exhaust memory.
     if count > MAX_TRACK_POINTS:
         raise PredictionError(
             f"track_step_seconds {step_seconds} would produce more than {MAX_TRACK_POINTS} points"
@@ -200,7 +188,6 @@ def _validate(latitude, longitude, minimum_elevation, search_start, search_end, 
         raise PredictionError("search_end must be after search_start")
 
     span_days = (search_end - search_start).total_seconds() / 86400.0
-    # A very wide search is almost always a mistake, and it is expensive.
     if span_days > MAX_SEARCH_DAYS:
         raise PredictionError(f"search range must not exceed {MAX_SEARCH_DAYS} days")
     if track_step and track_step < MIN_TRACK_STEP_SECONDS:

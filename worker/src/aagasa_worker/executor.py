@@ -18,11 +18,8 @@ from aagasa_worker.planstore import ExecutionState, PlanStore, StoredPlan
 
 logger = logging.getLogger(__name__)
 
-# How long before AOS the executor wakes to prepare hardware.
 DEFAULT_LEAD = timedelta(seconds=60)
 
-# Longest the loop sleeps between checks, so a newly synced pass is noticed
-# without waiting for the next scheduled one.
 MAX_SLEEP_SECONDS = 30.0
 
 
@@ -68,11 +65,8 @@ class Executor:
                  lead: timedelta = DEFAULT_LEAD, clock=None, on_finished=None):
         self._store = store
         self._handler = handler
-        # Called with a pass id once execution ends, so its output can be
-        # queued for upload. Failures here must not fail the pass.
         self._on_finished = on_finished
         self._lead = lead
-        # Injectable so tests can drive time without sleeping.
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._stop = threading.Event()
 
@@ -102,7 +96,6 @@ class Executor:
         """
         now = self._clock()
 
-        # Close out anything whose window has passed before looking for work.
         self._store.mark_missed_before(now)
 
         plan = self._store.next_due(now)
@@ -114,8 +107,6 @@ class Executor:
         return self._execute(plan)
 
     def _execute(self, plan: StoredPlan) -> StoredPlan | None:
-        # Claim it first: the state change is what stops a second executor,
-        # or a restart mid-pass, from running it again.
         if not self._store.mark_executing(plan.pass_id, self._clock()):
             logger.debug("pass %s was claimed elsewhere", plan.pass_id)
             return None
@@ -128,8 +119,6 @@ class Executor:
         except Exception as error:  # noqa: BLE001 - one bad pass must not stop the Worker
             logger.exception("pass %s raised during execution", plan.pass_id)
             self._store.mark_finished(plan.pass_id, ExecutionState.FAILED, str(error))
-            # A failed pass can still have produced partial output worth
-            # keeping, so its directory is scanned too.
             self._notify_finished(plan.pass_id)
             return plan
 

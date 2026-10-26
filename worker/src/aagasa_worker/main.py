@@ -45,7 +45,6 @@ class Worker:
         self._identity = identity
         self._stop = threading.Event()
         self._connected = False
-        # Registration happens once per run; see _reconcile.
         self._registered = False
 
     def stop(self) -> None:
@@ -78,8 +77,6 @@ class Worker:
                 wait_seconds = retry_delay
                 retry_delay = next_delay(retry_delay)
             except Exception:  # noqa: BLE001
-                # The Worker must keep executing whatever goes wrong here.
-                # Synchronization is a convenience; execution is the job.
                 logger.exception("synchronization cycle failed; continuing")
                 wait_seconds = retry_delay
                 retry_delay = next_delay(retry_delay)
@@ -89,17 +86,11 @@ class Worker:
     def _reconcile(self) -> None:
         """One pass of the reconnect cycle."""
         identity = self._identity.current
-        # Register once per run even when the identity is already cached.
-        # Registration is how the Server learns what this station's SatDump
-        # provides, and SatDump can be reinstalled while the Worker is down.
-        # A cached identity still covers an outage: only the report is lost.
         if not identity.resolved or not self._registered:
             identity = self._identity.resolve()
             self._client.identity = identity
             self._registered = True
 
-        # Results first: they were gathered locally and only the Server can
-        # keep them permanently.
         self._uploader.report_outcomes()
         self._uploader.upload_pending()
 
@@ -111,7 +102,6 @@ class Worker:
             pending_uploads=pending_uploads,
             pending_reports=pending_reports,
         )
-        # Only pull the desired state when the Server says it has moved.
         if not response.state_is_current:
             self._sync.sync_once()
 
@@ -138,10 +128,6 @@ def main() -> int:
 
     logger.info("starting worker version=%s name=%s", __version__, config.worker_name)
 
-    # After any restart, expected or abnormal, the antenna position is unknown.
-    # Establish a known safe state before doing anything else, and keep running
-    # even if a device is missing so the Worker can still report its state
-    # (worker-spec sections 11.1 and 25).
     station = build_station(config)
     status = station.safe_startup()
     logger.info(
@@ -150,8 +136,6 @@ def main() -> int:
         status.satdump_available, status.pipeline_count,
     )
 
-    # The durable local store is what lets the Worker keep executing when the
-    # Server is unreachable (worker-spec section 7).
     store = PlanStore(config.state_directory)
     logger.info("local state loaded plans=%d generation=%s",
                 len(store.all_plans()), store.generation or "<none>")
@@ -167,11 +151,9 @@ def main() -> int:
 
     identity = IdentityResolver(client, store, config.worker_name,
                                 pipelines=available_pipelines)
-    # A cached identity lets a Worker restarted during an outage keep working.
     client.identity = identity.current if identity.current.resolved else None
     uploader = RecordingUploader(client, store, config.recordings_directory)
 
-    # Drives the rotator, the SDR and SatDump for each pass.
     handler = StationPassHandler(station, config.recordings_directory)
     executor = Executor(store, handler, on_finished=uploader.register_pass_output)
     execution_thread = threading.Thread(
@@ -183,8 +165,6 @@ def main() -> int:
 
     received = {}
 
-    # A signal handler must not log: it can interrupt the main thread while it
-    # holds the stream lock, which raises a reentrant-call error.
     def handle_signal(signum, _frame):
         received.setdefault("signal", signum)
         worker.stop()

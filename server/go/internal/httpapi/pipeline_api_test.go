@@ -9,8 +9,6 @@ import (
 	"aagasa/internal/store"
 )
 
-// SatDump pipelines (spec.md section 19.1). Standard ones come from the
-// station's own installation; custom ones are uploaded JSON.
 
 func TestPipelineListStartsEmptyUntilAStationReports(t *testing.T) {
 	env := newTestEnv(t)
@@ -23,7 +21,6 @@ func TestPipelineListStartsEmptyUntilAStationReports(t *testing.T) {
 	if len(body["pipelines"].([]any)) != 0 {
 		t.Errorf("pipelines = %v, want none", body["pipelines"])
 	}
-	// Nothing to choose from reads differently from an empty catalogue.
 	if body["reported_by_station"] != false {
 		t.Errorf("reported_by_station = %v, want false", body["reported_by_station"])
 	}
@@ -53,7 +50,6 @@ func TestStandardPipelinesComeFromTheStation(t *testing.T) {
 		}
 	}
 
-	// A reinstall with fewer pipelines withdraws the ones that are gone.
 	if _, err := env.repo.ReplaceStandardPipelines(ctx, []string{"noaa_apt"}); err != nil {
 		t.Fatalf("second inventory: %v", err)
 	}
@@ -63,8 +59,6 @@ func TestStandardPipelinesComeFromTheStation(t *testing.T) {
 	}
 }
 
-// An empty report means SatDump could not be read, not that the station has
-// none. Wiping the list on a failed read would break every future request.
 func TestAnEmptyInventoryChangesNothing(t *testing.T) {
 	env := newTestEnv(t)
 	env.rootReady(t)
@@ -107,14 +101,11 @@ func TestUploadingACustomPipeline(t *testing.T) {
 	if body["is_custom"] != true {
 		t.Errorf("is_custom = %v", body["is_custom"])
 	}
-	// The checksum identifies the content, so a pass can be tied to exactly
-	// this definition.
 	checksum, _ := body["checksum_sha256"].(string)
 	if len(checksum) != 64 {
 		t.Errorf("checksum = %q", checksum)
 	}
 
-	// It appears in the list, and the definition is not published there.
 	_, list := env.do(t, http.MethodGet, "/api/pipelines", userToken, nil)
 	found := false
 	for _, entry := range list["pipelines"].([]any) {
@@ -131,8 +122,6 @@ func TestUploadingACustomPipeline(t *testing.T) {
 	}
 }
 
-// Structure only: SatDump's semantics are its own business, but something
-// that cannot be a pipeline file at all is refused.
 func TestMalformedPipelineJSONIsRefused(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -154,9 +143,6 @@ func TestMalformedPipelineJSONIsRefused(t *testing.T) {
 	}
 }
 
-// A decoded result cannot be produced without saying how. Without this the
-// Worker falls back to a raw capture and the user quietly gets something
-// else.
 func TestProcessingWithoutAPipelineIsRefused(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -176,7 +162,6 @@ func TestProcessingWithoutAPipelineIsRefused(t *testing.T) {
 		t.Errorf("error = %v, want pipeline_required", body["error"])
 	}
 
-	// With one, the same request is accepted and the plan carries it.
 	pipeline, err := env.repo.CreatePipeline(context.Background(), store.Pipeline{
 		Name: "noaa_apt", IsCustom: false}, nil)
 	if err != nil {
@@ -198,7 +183,6 @@ func TestProcessingWithoutAPipelineIsRefused(t *testing.T) {
 	}
 }
 
-// Raw needs no pipeline, and must not start demanding one.
 func TestRawRecordingNeedsNoPipeline(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)

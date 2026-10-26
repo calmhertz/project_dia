@@ -4,12 +4,6 @@ import 'package:provider/provider.dart';
 import '../../state/session.dart';
 import '../satellites_screen.dart' show describeError;
 
-/// First-run setup, Root only (spec.md section 17.1).
-///
-/// It runs once and writes the station, both bands, the rotator and receiver,
-/// the first scheduling configuration and the station's Worker in a single
-/// transaction. A rejected setup leaves nothing behind, so the form can
-/// simply be corrected and submitted again.
 class SetupScreen extends StatefulWidget {
   const SetupScreen({super.key, required this.onCompleted});
 
@@ -147,8 +141,6 @@ class _SetupScreenState extends State<SetupScreen> {
     return null;
   }
 
-  /// A band without a centre frequency produces no pass plan, so approval
-  /// would fail long after setup looked successful.
   String? _frequency(String? value) {
     final parsed = int.tryParse((value ?? '').trim());
     if (parsed == null) return 'Enter the frequency in hertz';
@@ -156,8 +148,6 @@ class _SetupScreenState extends State<SetupScreen> {
     return null;
   }
 
-  /// The G-550's real limits (spec.md section 9), checked before anything is
-  /// stored. The Server checks again, and so does the database.
   String? _park(String? value, int limit) {
     final parsed = int.tryParse(value ?? '');
     if (parsed == null) return 'Enter a whole number';
@@ -257,8 +247,6 @@ class _SetupScreenState extends State<SetupScreen> {
               children: [
                 _Plain(controller: _vhfAntenna, label: 'VHF antenna'),
                 const SizedBox(height: 12),
-                // Required: a band with no centre frequency cannot produce a
-                // pass plan, so approval would fail later instead of here.
                 TextFormField(
                   controller: _vhfFrequency,
                   decoration: const InputDecoration(

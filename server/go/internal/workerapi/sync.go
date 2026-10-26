@@ -16,17 +16,12 @@ import (
 	"aagasa/internal/store"
 )
 
-// HeartbeatInterval is how often a Worker is expected to report in, and
-// StaleAfter is how long the Server waits before calling it offline
-// (spec.md section 7).
 const (
 	HeartbeatInterval = 5 * time.Second
 	StaleAfter        = 15 * time.Second
-	// How often the Server looks for workers that have stopped reporting.
 	StaleCheckInterval = 5 * time.Second
 )
 
-// Register resolves a Worker's identity from its configured name.
 func (s *Service) Register(ctx context.Context,
 	request *workerv1.RegisterRequest) (*workerv1.RegisterResponse, error) {
 	name := request.GetWorkerName()
@@ -37,8 +32,6 @@ func (s *Service) Register(ctx context.Context,
 	worker, err := s.repo.GetWorkerByName(ctx, name)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			// The Worker is created during first-run setup, so an unknown
-			// name means the station has not been configured for it.
 			return nil, status.Errorf(codes.NotFound,
 				"no worker named %q is configured for this server", name)
 		}
@@ -52,9 +45,6 @@ func (s *Service) Register(ctx context.Context,
 		return nil, status.Error(codes.Internal, "could not resolve the station")
 	}
 
-	// What this station's SatDump can actually do. The Server has none of its
-	// own, so a registration is the only moment it learns (server-spec
-	// section 21).
 	if names := request.GetAvailablePipelines(); len(names) > 0 {
 		if removed, err := s.repo.ReplaceStandardPipelines(ctx, names); err != nil {
 			s.logger.Error("record available pipelines", slog.String("error", err.Error()))
@@ -68,7 +58,6 @@ func (s *Service) Register(ctx context.Context,
 		slog.String("worker", name),
 		slog.String("worker_id", worker.ID.String()),
 		slog.String("station", station.Name))
-	// A station binding its identity is privileged, so it leaves a trace.
 	s.auditWorker(ctx, "worker.registered", worker.ID.String(), map[string]any{
 		"worker": name, "station": station.Name,
 		"worker_version": request.GetWorkerVersion(),
@@ -81,7 +70,6 @@ func (s *Service) Register(ctx context.Context,
 	}, nil
 }
 
-// Heartbeat records liveness and tells the Worker whether its state is current.
 func (s *Service) Heartbeat(ctx context.Context,
 	request *workerv1.HeartbeatRequest) (*workerv1.HeartbeatResponse, error) {
 	workerID, err := uuid.Parse(request.GetWorkerId())
@@ -113,9 +101,6 @@ func (s *Service) Heartbeat(ctx context.Context,
 		s.logger.Info("worker is online",
 			slog.String("worker_id", workerID.String()),
 			slog.Uint64("pending_uploads", uint64(request.GetPendingUploads())))
-		// spec.md section 22 counts worker state changes as auditable. Only
-		// the transition is recorded; a heartbeat every five seconds is not
-		// an event worth keeping.
 		s.auditWorker(ctx, "worker.online", workerID.String(), map[string]any{
 			"previous_state":  string(worker.ConnectionState),
 			"pending_uploads": request.GetPendingUploads(),
@@ -130,7 +115,6 @@ func (s *Service) Heartbeat(ctx context.Context,
 	}
 	current := desired == request.GetStateGeneration()
 
-	// Only the moment a Worker becomes current counts as a completed sync.
 	if current {
 		if err := s.repo.RecordWorkerSync(ctx, workerID, now, desired); err != nil {
 			s.logger.Error("record worker sync", slog.String("error", err.Error()))
@@ -144,7 +128,6 @@ func (s *Service) Heartbeat(ctx context.Context,
 	}, nil
 }
 
-// desiredGeneration hashes the station's current plan set.
 func (s *Service) desiredGeneration(ctx context.Context, stationID uuid.UUID) (string, error) {
 	stored, err := s.repo.ListPassPlansForStation(ctx, stationID, time.Now().UTC())
 	if err != nil {
@@ -162,10 +145,6 @@ func (s *Service) desiredGeneration(ctx context.Context, stationID uuid.UUID) (s
 	return passplan.SetGeneration(plans), nil
 }
 
-// RunStaleWorkerMonitor marks workers offline once they stop reporting.
-//
-// spec.md section 6.3: the Server must clearly report an unavailable station,
-// because scheduling depends on it. Returns when ctx is cancelled.
 func RunStaleWorkerMonitor(ctx context.Context, repo *store.Repository, logger *slog.Logger) {
 	logger.Info("worker monitor started",
 		slog.Duration("stale_after", StaleAfter))
@@ -198,8 +177,6 @@ func RunStaleWorkerMonitor(ctx context.Context, repo *store.Repository, logger *
 	}
 }
 
-// auditWorker records a worker state change. There is no human actor, so the
-// record carries none: the trail says the system did it.
 func (s *Service) auditWorker(ctx context.Context, action, workerID string,
 	details map[string]any) {
 	if _, err := s.repo.AppendAudit(ctx, domain.AuditRecord{

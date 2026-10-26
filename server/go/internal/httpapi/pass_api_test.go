@@ -11,16 +11,12 @@ import (
 	"aagasa/internal/prediction"
 )
 
-// The scheduling API end to end, with a scripted predictor so no hardware or
-// prediction service is needed (the V7 exit criterion).
 
 func (e *testEnv) setupStation(t *testing.T, rootToken string) {
 	t.Helper()
 	if code, body := e.do(t, http.MethodPost, "/api/setup", rootToken, validSetupBody()); code != http.StatusCreated {
 		t.Fatalf("setup: %d %v", code, body)
 	}
-	// V12 drives this from the heartbeat; until then the test marks the
-	// station reachable so scheduling is permitted.
 	ctx := context.Background()
 	worker, err := e.repo.GetWorkerByName(ctx, "worker-1")
 	if err != nil {
@@ -32,8 +28,6 @@ func (e *testEnv) setupStation(t *testing.T, rootToken string) {
 	}
 }
 
-// seedSatellite inserts a satellite and TLE directly, bypassing the live
-// providers so the test stays offline.
 func (e *testEnv) seedSatellite(t *testing.T) string {
 	t.Helper()
 	ctx := context.Background()
@@ -78,7 +72,6 @@ func TestSchedulingFlowOverTheAPI(t *testing.T) {
 	aos := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
 	env.predictor.setPasses(passAt(aos, 10*time.Minute))
 
-	// Request.
 	code, body := env.schedulePass(t, userToken, satelliteID, aos, nil)
 	if code != http.StatusCreated {
 		t.Fatalf("request pass = %d %v", code, body)
@@ -89,12 +82,10 @@ func TestSchedulingFlowOverTheAPI(t *testing.T) {
 	}
 	passID := pass["id"].(string)
 
-	// A normal user cannot approve.
 	if code, _ := env.do(t, http.MethodPost, "/api/passes/"+passID+"/approve", userToken, nil); code != http.StatusForbidden {
 		t.Errorf("user approving = %d, want 403", code)
 	}
 
-	// An admin can.
 	code, body = env.do(t, http.MethodPost, "/api/passes/"+passID+"/approve", adminToken, nil)
 	if code != http.StatusOK {
 		t.Fatalf("admin approve = %d %v", code, body)
@@ -104,8 +95,6 @@ func TestSchedulingFlowOverTheAPI(t *testing.T) {
 	}
 }
 
-// spec.md section 15: the conflict response says the slot is taken and
-// nothing about who took it.
 func TestConflictResponseIsSanitized(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -128,7 +117,6 @@ func TestConflictResponseIsSanitized(t *testing.T) {
 	if body["error"] != "station_conflict" {
 		t.Errorf("error = %v", body["error"])
 	}
-	// The occupied window is disclosed; the owner is not.
 	if body["occupied_from"] == nil || body["occupied_to"] == nil {
 		t.Error("the occupied window is missing")
 	}
@@ -139,7 +127,6 @@ func TestConflictResponseIsSanitized(t *testing.T) {
 	}
 }
 
-// spec.md section 16: a private pass is invisible to an unrelated user.
 func TestPrivatePassIsHiddenFromOtherUsers(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -154,20 +141,16 @@ func TestPrivatePassIsHiddenFromOtherUsers(t *testing.T) {
 	_, body := env.schedulePass(t, ownerToken, satelliteID, aos, nil)
 	passID := body["pass"].(map[string]any)["id"].(string)
 
-	// A stranger gets 404, not 403: even existence is private.
 	if code, _ := env.do(t, http.MethodGet, "/api/passes/"+passID, strangerToken, nil); code != http.StatusNotFound {
 		t.Errorf("stranger reading a private pass = %d, want 404", code)
 	}
-	// The owner sees it.
 	if code, _ := env.do(t, http.MethodGet, "/api/passes/"+passID, ownerToken, nil); code != http.StatusOK {
 		t.Errorf("owner reading their pass = %d, want 200", code)
 	}
-	// So do Admin and Root.
 	if code, _ := env.do(t, http.MethodGet, "/api/passes/"+passID, rootToken, nil); code != http.StatusOK {
 		t.Errorf("root reading a private pass = %d, want 200", code)
 	}
 
-	// It is absent from the stranger's listing too.
 	_, list := env.do(t, http.MethodGet, "/api/passes?scope=all", strangerToken, nil)
 	if list["error"] != "forbidden" {
 		t.Errorf("a normal user could request scope=all: %v", list)
@@ -192,7 +175,6 @@ func TestPublicPassIsVisibleWithoutRevealingTheOwner(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("stranger reading a public pass = %d, want 200", code)
 	}
-	// Visible, but the owner is not named.
 	if requester := seen["pass"].(map[string]any)["requested_by"]; requester != nil && requester != "" {
 		if requester == ownerID {
 			t.Error("a public pass discloses its owner to an unrelated user")
@@ -200,11 +182,10 @@ func TestPublicPassIsVisibleWithoutRevealingTheOwner(t *testing.T) {
 	}
 }
 
-// spec.md section 8: a band mismatch warns rather than blocking.
 func TestBandMismatchReturnsAWarningAndStillSchedules(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
-	env.setupStation(t, rootToken) // station is VHF
+	env.setupStation(t, rootToken)
 	satelliteID := env.seedSatellite(t)
 	_, userToken := env.createUser(t, rootToken, "banduser", "user")
 
@@ -224,7 +205,6 @@ func TestBandMismatchReturnsAWarningAndStillSchedules(t *testing.T) {
 	}
 }
 
-// Global test property 6, over the API.
 func TestRootOverrideOverTheAPI(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -238,7 +218,6 @@ func TestRootOverrideOverTheAPI(t *testing.T) {
 	_, body := env.schedulePass(t, userToken, satelliteID, aos, nil)
 	victimID := body["pass"].(map[string]any)["id"].(string)
 
-	// Without override, even Root is refused.
 	if code, _ := env.schedulePass(t, rootToken, satelliteID, aos, nil); code != http.StatusConflict {
 		t.Errorf("root without override = %d, want 409", code)
 	}
@@ -252,7 +231,6 @@ func TestRootOverrideOverTheAPI(t *testing.T) {
 		t.Errorf("overridden = %v, want the displaced pass", overridden)
 	}
 
-	// The displaced pass survives, cancelled with the override reason.
 	code, seen := env.do(t, http.MethodGet, "/api/passes/"+victimID, rootToken, nil)
 	if code != http.StatusOK {
 		t.Fatalf("the displaced pass is gone: %d", code)
@@ -266,7 +244,6 @@ func TestRootOverrideOverTheAPI(t *testing.T) {
 	}
 }
 
-// An admin must not be able to override.
 func TestAdminCannotOverride(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -282,7 +259,6 @@ func TestAdminCannotOverride(t *testing.T) {
 	}
 }
 
-// Global test property 12.
 func TestOfflineWorkerBlocksSchedulingOverTheAPI(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -308,23 +284,20 @@ func TestOfflineWorkerBlocksSchedulingOverTheAPI(t *testing.T) {
 	}
 }
 
-// Global test properties 3, 4 and 5, over the API.
 func TestLeadTimeRulesOverTheAPI(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
-	env.setupStation(t, rootToken) // 1800s lead time
+	env.setupStation(t, rootToken)
 	satelliteID := env.seedSatellite(t)
 	_, userToken := env.createUser(t, rootToken, "eager", "user")
 
 	soon := time.Now().UTC().Add(10 * time.Minute).Truncate(time.Second)
 	env.predictor.setPasses(passAt(soon, 10*time.Minute))
 
-	// Too soon for a normal user.
 	code, body := env.schedulePass(t, userToken, satelliteID, soon, nil)
 	if code != http.StatusConflict || body["error"] != "lead_time" {
 		t.Errorf("user inside the lead time = %d %v, want 409 lead_time", code, body)
 	}
-	// And for Root, with or without override.
 	if code, _ := env.schedulePass(t, rootToken, satelliteID, soon, nil); code != http.StatusConflict {
 		t.Errorf("root inside the lead time = %d, want 409", code)
 	}
@@ -332,7 +305,6 @@ func TestLeadTimeRulesOverTheAPI(t *testing.T) {
 		t.Errorf("root override inside the lead time = %d, want 409", code)
 	}
 
-	// Root shortens the lead time; it must not take effect immediately.
 	code, saved := env.do(t, http.MethodPut, "/api/scheduling-config", rootToken, map[string]any{
 		"minimum_lead_time_seconds": 60,
 		"pre_pass_buffer_seconds":   120, "post_pass_buffer_seconds": 120,
@@ -346,7 +318,6 @@ func TestLeadTimeRulesOverTheAPI(t *testing.T) {
 		t.Fatal("no effective_from returned")
 	}
 
-	// Still refused, because the old policy is in force.
 	if code, body := env.schedulePass(t, rootToken, satelliteID, soon, nil); code != http.StatusConflict {
 		t.Errorf("after shortening = %d %v, want the old lead time still enforced", code, body)
 	}
@@ -383,7 +354,6 @@ func TestOwnerCanCancelAndFreeTheSlot(t *testing.T) {
 	_, body := env.schedulePass(t, ownerToken, satelliteID, aos, nil)
 	passID := body["pass"].(map[string]any)["id"].(string)
 
-	// A stranger cannot cancel it.
 	if code, _ := env.do(t, http.MethodPost, "/api/passes/"+passID+"/cancel", otherToken, nil); code != http.StatusForbidden {
 		t.Errorf("stranger cancelling = %d, want 403", code)
 	}
@@ -391,15 +361,12 @@ func TestOwnerCanCancelAndFreeTheSlot(t *testing.T) {
 	if code, _ := env.do(t, http.MethodPost, "/api/passes/"+passID+"/cancel", ownerToken, nil); code != http.StatusOK {
 		t.Errorf("owner cancelling = %d, want 200", code)
 	}
-	// The slot is free for someone else.
 	if code, body := env.schedulePass(t, otherToken, satelliteID, aos, nil); code != http.StatusCreated {
 		t.Errorf("slot not released = %d %v", code, body)
 	}
 }
 
 func passAt(aos time.Time, duration time.Duration) prediction.Pass {
-	// A plan needs a pointing timeline, so the stub supplies one: without it
-	// the tests would never exercise the path that generates a plan.
 	var track []prediction.TrackPoint
 	for offset := time.Duration(0); offset <= duration; offset += 5 * time.Second {
 		track = append(track, prediction.TrackPoint{
@@ -416,12 +383,7 @@ func passAt(aos time.Time, duration time.Duration) prediction.Pass {
 	}
 }
 
-// Approval builds the executable plan. If it cannot, the pass must not be
-// left approved: the Worker would have nothing to run and the pass could no
-// longer be rejected. This is the failure a live station hit.
 
-// setupStationWithoutFrequency completes setup with the centre frequency
-// missing, which is what an incomplete configuration looks like.
 func (e *testEnv) setupStationWithoutFrequency(t *testing.T, rootToken string) {
 	t.Helper()
 	body := validSetupBody()
@@ -462,13 +424,11 @@ func TestApprovalIsRefusedWhenTheStationCannotExecute(t *testing.T) {
 	if body["error"] != "station_not_configured" {
 		t.Errorf("error = %v, want station_not_configured", body["error"])
 	}
-	// The message has to name what is missing, or Root cannot fix it.
 	if message, _ := body["message"].(string); message == "" ||
 		!containsAll(message, "vhf", "frequency") {
 		t.Errorf("message = %q, want it to name the band and the setting", message)
 	}
 
-	// The pass is untouched, so the operator can still reject it.
 	_, after := env.do(t, http.MethodGet, "/api/passes/"+passID, rootToken, nil)
 	if status := after["pass"].(map[string]any)["status"]; status != "pending_approval" {
 		t.Fatalf("status = %v, want pending_approval", status)
@@ -478,7 +438,6 @@ func TestApprovalIsRefusedWhenTheStationCannotExecute(t *testing.T) {
 	}
 }
 
-// Once the station is configured, the same approval works and stores a plan.
 func TestApprovalStoresAPlanWhenTheStationIsConfigured(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -508,7 +467,6 @@ func TestApprovalStoresAPlanWhenTheStationIsConfigured(t *testing.T) {
 	}
 }
 
-// Deciding twice is somebody else getting there first, not a server fault.
 func TestDecidingAnAlreadyDecidedPassIsAConflict(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)

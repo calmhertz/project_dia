@@ -1,8 +1,3 @@
-// Package domain holds Aagasa's core entity types.
-//
-// These mirror the PostgreSQL schema in internal/store/migrations. Behaviour
-// (authentication, approval, scheduling) belongs to later phases; this package
-// only describes what is stored.
 package domain
 
 import (
@@ -11,7 +6,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// UserRole is a user's authority level (spec.md section 17).
 type UserRole string
 
 const (
@@ -20,7 +14,6 @@ const (
 	RoleUser  UserRole = "user"
 )
 
-// RFBand is a station RF chain. Only one is active at a time.
 type RFBand string
 
 const (
@@ -28,7 +21,6 @@ const (
 	BandUHF RFBand = "uhf"
 )
 
-// PassStatus is the externally meaningful pass lifecycle (spec.md section 14).
 type PassStatus string
 
 const (
@@ -42,7 +34,6 @@ const (
 	PassMissed          PassStatus = "missed"
 )
 
-// PassVisibility controls who may see a pass and its results.
 type PassVisibility string
 
 const (
@@ -50,7 +41,6 @@ const (
 	VisibilityPublic  PassVisibility = "public"
 )
 
-// CancellationReason records why an approved pass stopped being executable.
 type CancellationReason string
 
 const (
@@ -59,7 +49,6 @@ const (
 	CancelledByRootOverride CancellationReason = "cancelled_by_root_override"
 )
 
-// RecordingMode is what a pass produces.
 type RecordingMode string
 
 const (
@@ -68,7 +57,6 @@ const (
 	RecordRawAndProcess RecordingMode = "raw_and_process"
 )
 
-// TLESource identifies where orbital data came from.
 type TLESource string
 
 const (
@@ -77,7 +65,6 @@ const (
 	SourceManual    TLESource = "manual"
 )
 
-// WorkerConnectionState is the Server's view of Worker reachability.
 type WorkerConnectionState string
 
 const (
@@ -107,8 +94,6 @@ type Station struct {
 	UpdatedAt    time.Time
 }
 
-// SchedulingConfig is versioned: a change inserts a new row rather than
-// mutating the current one (spec.md sections 13.6 and 13.8).
 type SchedulingConfig struct {
 	ID                      uuid.UUID
 	StationID               uuid.UUID
@@ -132,10 +117,8 @@ type Worker struct {
 	LastSeenAt             *time.Time
 	LastSyncAt             *time.Time
 	DesiredStateGeneration int64
-	// What the Worker last reported it was still carrying.
 	PendingUploads int
 	PendingReports int
-	// Desired-state generation the Worker has confirmed it holds.
 	SyncedGeneration string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
@@ -179,7 +162,6 @@ type Pass struct {
 	TCAAt               *time.Time
 	MaxElevationDegrees float64
 
-	// Resource reservation, distinct from the recording margins below.
 	ReservedFrom time.Time
 	ReservedTo   time.Time
 
@@ -199,7 +181,6 @@ type Pass struct {
 	UpdatedAt time.Time
 }
 
-// AuditRecord is append-only; the database rejects updates and deletes.
 type AuditRecord struct {
 	ID            int64
 	ActorUserID   *uuid.UUID
@@ -212,7 +193,6 @@ type AuditRecord struct {
 	CreatedAt     time.Time
 }
 
-// StationBandConfig is the antenna and radio setup for one RF band.
 type StationBandConfig struct {
 	StationID          uuid.UUID
 	Band               RFBand
@@ -224,7 +204,6 @@ type StationBandConfig struct {
 	BiasTeeEnabled     bool
 }
 
-// StationHardwareConfig is the rotator and SDR setup for a station.
 type StationHardwareConfig struct {
 	StationID                   uuid.UUID
 	RotatorSerialPort           string

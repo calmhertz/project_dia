@@ -5,11 +5,6 @@ import '../../models/models.dart';
 import '../../state/session.dart';
 import '../satellites_screen.dart' show describeError;
 
-/// Edit a catalogue entry, Root only.
-///
-/// The catalog number is not editable: it is the satellite's identity and the
-/// key every orbital-data lookup uses. Closing a satellite for scheduling is
-/// the reversible alternative to removing it.
 class EditSatelliteDialog extends StatefulWidget {
   const EditSatelliteDialog({super.key, required this.satellite});
 

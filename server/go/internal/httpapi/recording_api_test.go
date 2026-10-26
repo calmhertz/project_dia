@@ -16,11 +16,7 @@ import (
 	"aagasa/internal/store"
 )
 
-// The recording endpoints the V13 client uses. A recording is reachable only
-// through the pass it belongs to, so its visibility is the pass's
-// (spec.md section 16).
 
-// seedRecording writes a file and its metadata for an existing pass.
 func (e *testEnv) seedRecording(t *testing.T, passID, content string) (string, string) {
 	t.Helper()
 	ctx := context.Background()
@@ -50,7 +46,6 @@ func (e *testEnv) seedRecording(t *testing.T, passID, content string) (string, s
 	return recordingID, stored
 }
 
-// scheduleOwnedPass requests a pass and returns its id.
 func (e *testEnv) scheduleOwnedPass(t *testing.T, token, satelliteID string, visibility string) string {
 	t.Helper()
 	aos := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
@@ -62,8 +57,6 @@ func (e *testEnv) scheduleOwnedPass(t *testing.T, token, satelliteID string, vis
 	return body["pass"].(map[string]any)["id"].(string)
 }
 
-// download returns the status and body of a raw GET, which the JSON helper
-// cannot express.
 func (e *testEnv) download(t *testing.T, path, token string) (int, string, http.Header) {
 	t.Helper()
 	request, err := http.NewRequest(http.MethodGet, e.server.URL+path, nil)
@@ -104,12 +97,10 @@ func TestOwnerListsAndDownloadsTheirRecording(t *testing.T) {
 	if first["recording_id"] != recordingID {
 		t.Errorf("recording_id = %v", first["recording_id"])
 	}
-	// The client follows this link rather than building one.
 	url, _ := first["download_url"].(string)
 	if url != "/api/recordings/"+recordingID+"/download" {
 		t.Fatalf("download_url = %q", url)
 	}
-	// The stored path is an internal detail and must not be published.
 	if _, present := first["stored_path"]; present {
 		t.Error("the response discloses the server filesystem path")
 	}
@@ -137,12 +128,9 @@ func TestRecordingsOfAPrivatePassAreHiddenFromOtherUsers(t *testing.T) {
 	passID := env.scheduleOwnedPass(t, ownerToken, satelliteID, "private")
 	recordingID, _ := env.seedRecording(t, passID, "private-signal")
 
-	// The listing is 404, matching the pass: even existence is private.
 	if code, _ := env.do(t, http.MethodGet, "/api/passes/"+passID+"/recordings", strangerToken, nil); code != http.StatusNotFound {
 		t.Errorf("stranger listing = %d, want 404", code)
 	}
-	// A leaked link does not work either, because the right comes from the
-	// pass and not from knowing the id.
 	status, content, _ := env.download(t, "/api/recordings/"+recordingID+"/download", strangerToken)
 	if status != http.StatusNotFound {
 		t.Errorf("stranger download = %d, want 404", status)
@@ -150,7 +138,6 @@ func TestRecordingsOfAPrivatePassAreHiddenFromOtherUsers(t *testing.T) {
 	if content == "private-signal" {
 		t.Error("a stranger received the recording content")
 	}
-	// Root oversees everything.
 	if status, _, _ := env.download(t, "/api/recordings/"+recordingID+"/download", rootToken); status != http.StatusOK {
 		t.Errorf("root download = %d, want 200", status)
 	}
@@ -191,8 +178,6 @@ func TestRecordingDownloadRequiresAuthentication(t *testing.T) {
 	}
 }
 
-// A recording id is a hash, so anything else is a bad request rather than a
-// database lookup or, worse, a path.
 func TestMalformedRecordingIDIsRejected(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -205,8 +190,6 @@ func TestMalformedRecordingIDIsRejected(t *testing.T) {
 	}
 }
 
-// The metadata can outlive the file, for instance after a disk is replaced.
-// That must be reported, not served as an empty body.
 func TestMissingRecordingContentIsReported(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -229,8 +212,6 @@ func TestMissingRecordingContentIsReported(t *testing.T) {
 	}
 }
 
-// The recordings listing (client-spec section 20). Visibility is applied in
-// the query, so a private recording cannot appear in someone else's list.
 
 func TestRecordingsListingRespectsVisibility(t *testing.T) {
 	env := newTestEnv(t)
@@ -243,7 +224,6 @@ func TestRecordingsListingRespectsVisibility(t *testing.T) {
 	privateID := env.scheduleOwnedPass(t, ownerToken, satelliteID, "private")
 	env.seedRecording(t, privateID, "private-content")
 
-	// The owner sees their own.
 	code, body := env.do(t, http.MethodGet, "/api/recordings", ownerToken, nil)
 	if code != http.StatusOK {
 		t.Fatalf("owner list = %d %v", code, body)
@@ -252,25 +232,21 @@ func TestRecordingsListingRespectsVisibility(t *testing.T) {
 		t.Fatalf("owner sees %v", body["recordings"])
 	}
 	first := body["recordings"].([]any)[0].(map[string]any)
-	// Enough to read without another request per row.
 	for _, field := range []string{"satellite_id", "pass_aos", "visibility", "download_url"} {
 		if _, present := first[field]; !present {
 			t.Errorf("the listing is missing %q", field)
 		}
 	}
 
-	// A stranger sees nothing at all, in either scope.
 	for _, scope := range []string{"", "?scope=mine", "?scope=public"} {
 		_, seen := env.do(t, http.MethodGet, "/api/recordings"+scope, strangerToken, nil)
 		if len(seen["recordings"].([]any)) != 0 {
 			t.Errorf("a stranger sees %v with scope %q", seen["recordings"], scope)
 		}
 	}
-	// And cannot ask for everything.
 	if code, _ := env.do(t, http.MethodGet, "/api/recordings?scope=all", strangerToken, nil); code != http.StatusForbidden {
 		t.Errorf("stranger scope=all = %d, want 403", code)
 	}
-	// Root can.
 	_, all := env.do(t, http.MethodGet, "/api/recordings?scope=all", rootToken, nil)
 	if len(all["recordings"].([]any)) != 1 {
 		t.Errorf("root scope=all sees %v", all["recordings"])
@@ -292,7 +268,6 @@ func TestPublicRecordingsAppearInThePublicScope(t *testing.T) {
 	if len(body["recordings"].([]any)) != 1 {
 		t.Fatalf("public scope shows %v", body["recordings"])
 	}
-	// The listing says nothing about who owns it.
 	entry := body["recordings"].([]any)[0].(map[string]any)
 	if _, present := entry["requested_by"]; present {
 		t.Error("the public listing names the pass owner")

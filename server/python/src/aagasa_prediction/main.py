@@ -43,8 +43,6 @@ def main() -> int:
 
     received = {}
 
-    # A signal handler must not log: it can interrupt the main thread while it
-    # holds the stream lock, which raises a reentrant-call error.
     def handle_signal(signum, _frame):
         received.setdefault("signal", signum)
         server.stop(SHUTDOWN_GRACE_SECONDS)

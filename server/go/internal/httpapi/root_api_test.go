@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-// The V15 Root control surface. Root configures the station; an Admin may
-// not, and a change never rewrites a pass that is already committed.
 
 func TestStationConfigIsRootOnly(t *testing.T) {
 	env := newTestEnv(t)
@@ -51,14 +49,12 @@ func TestRootUpdatesStationIdentityAndBand(t *testing.T) {
 		t.Errorf("update did not take: %v", body)
 	}
 
-	// The change is visible to the Admin operational view too.
 	_, status := env.do(t, http.MethodGet, "/api/station", adminToken, nil)
 	if status["active_rf_band"] != "uhf" {
 		t.Errorf("station status still reports %v", status["active_rf_band"])
 	}
 }
 
-// Nonsense must be refused before it reaches the database or the rotator.
 func TestStationUpdateRejectsImpossibleValues(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -77,8 +73,6 @@ func TestStationUpdateRejectsImpossibleValues(t *testing.T) {
 	}
 }
 
-// client-spec section 29: Root is warned that scheduled work exists, and the
-// work itself is left alone.
 func TestConfigurationChangeReportsButDoesNotRewriteScheduledPasses(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -132,14 +126,11 @@ func TestRootUpdatesBandAndHardwareConfiguration(t *testing.T) {
 	if hardware["rotator_serial_port"] != "/dev/ttyUSB1" {
 		t.Errorf("serial port = %v", hardware["rotator_serial_port"])
 	}
-	// Untouched fields keep their value rather than being zeroed.
 	if hardware["rotator_baud_rate"] != float64(9600) {
 		t.Errorf("baud rate = %v, want the previous 9600", hardware["rotator_baud_rate"])
 	}
 }
 
-// spec.md section 9: the G-550 accepts azimuth 0..359 and elevation 0..90.
-// An out-of-range park angle would be commanded to real hardware.
 func TestHardwareUpdateEnforcesRotatorLimits(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)
@@ -158,7 +149,6 @@ func TestHardwareUpdateEnforcesRotatorLimits(t *testing.T) {
 		}
 	}
 
-	// Nothing was stored: the configuration still reads as it was set up.
 	_, config := env.do(t, http.MethodGet, "/api/station/config", rootToken, nil)
 	hardware := config["hardware"].(map[string]any)
 	if hardware["rotator_park_azimuth_degrees"] != float64(0) {
@@ -208,8 +198,6 @@ func TestAuditTrailIsRootOnlyAndRecordsConfigurationChanges(t *testing.T) {
 	if record["actor_user_id"] == nil {
 		t.Error("the record does not say who did it")
 	}
-	// The recorded before/after state is for forensic reading at the database
-	// and is deliberately not published over HTTP.
 	for _, field := range []string{"previous_state", "new_state"} {
 		if _, present := record[field]; present {
 			t.Errorf("the audit listing publishes %q", field)
@@ -217,8 +205,6 @@ func TestAuditTrailIsRootOnlyAndRecordsConfigurationChanges(t *testing.T) {
 	}
 }
 
-// Every privileged action leaves a trace, including ones taken long before
-// this endpoint existed.
 func TestAuditTrailIncludesEarlierPrivilegedActions(t *testing.T) {
 	env := newTestEnv(t)
 	rootToken := env.rootReady(t)

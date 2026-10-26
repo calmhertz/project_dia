@@ -17,7 +17,6 @@ aagasa-hardware = "aagasa_worker.hardware.cli:main"
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-# "aagasa" holds generated protobuf code; regenerate with "make proto".
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["aagasa_worker*", "aagasa*"]

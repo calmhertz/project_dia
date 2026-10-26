@@ -25,23 +25,15 @@ from aagasa_worker.recordings import free_bytes
 
 logger = logging.getLogger(__name__)
 
-# Raw capture writes two bytes per sample per channel, I and Q.
 BYTES_PER_SAMPLE = 4
 
-# Headroom kept free beyond the pass itself, so a refused pass still leaves
-# room for the recordings already waiting to upload.
 RESERVE_BYTES = 1 << 30
 
 
-# Highest plan schema version this Worker can execute.
 SUPPORTED_PLAN_VERSION = 1
 
-# How long after the recording window the Worker waits for SatDump to finish
-# on its own before stopping it.
 SATDUMP_GRACE_SECONDS = 15
 
-# Pointing is only re-commanded when the antenna needs to move at least this
-# far, so a slow pass does not stream redundant serial writes at the rotator.
 MIN_POINTING_CHANGE_DEGREES = 1.0
 
 
@@ -89,7 +81,6 @@ class StationPassHandler:
         self._station = station
         self._recordings = Path(recordings_directory)
         self._clock = clock or (lambda: datetime.now(timezone.utc))
-        # Injected so tests can run a pass without waiting for real time.
         self._sleep = sleeper or (lambda seconds, stop: stop.wait(seconds))
 
     def execute(self, stored: StoredPlan, stop: threading.Event) -> ExecutionOutcome:
@@ -104,10 +95,8 @@ class StationPassHandler:
         try:
             return self._run(plan, stored, stop, report)
         finally:
-            # Whatever happened, leave the station safe.
             self._safe_finish(report)
 
-    # Steps ----------------------------------------------------------------
 
     def _decode(self, stored: StoredPlan) -> passplan_pb2.PassPlan:
         plan = passplan_pb2.PassPlan()
@@ -129,7 +118,6 @@ class StationPassHandler:
             raise PlanNotExecutable("the recording window has already closed")
 
         if not plan.track:
-            # Without pointing the antenna would sit still through the pass.
             raise PlanNotExecutable("the plan carries no pointing timeline")
 
         if plan.radio.frequency_hz <= 0 or plan.radio.sample_rate_hz <= 0:
@@ -137,32 +125,24 @@ class StationPassHandler:
 
     def _run(self, plan: passplan_pb2.PassPlan, stored: StoredPlan,
              stop: threading.Event, report: ExecutionReport) -> ExecutionOutcome:
-        # Step 2: verify hardware before committing to the pass.
         status = self._station.probe()
         if not status.rotator_available:
             report.problems.append(f"rotator unavailable: {status.rotator_error}")
         if not status.sdr_available:
             report.problems.append(f"sdr unavailable: {status.sdr_error}")
         if not status.satdump_available:
-            # Without SatDump there is nothing to capture with, so stop here
-            # rather than slewing the antenna for no reason.
             return ExecutionOutcome(
                 succeeded=False,
                 detail=f"satdump unavailable: {status.satdump_error}")
 
-        # Step 2b: refuse a pass the disk cannot hold. Filling the disk
-        # mid-pass costs the recording anyway and endangers the ones already
-        # waiting to upload (spec.md section 19.2).
         shortfall = self._space_shortfall(plan)
         if shortfall is not None:
             logger.error("pass %s refused: %s", stored.pass_id, shortfall)
             return ExecutionOutcome(succeeded=False, detail=shortfall)
 
-        # Step 3: pre-position the antenna at the first track point.
         first = plan.track[0]
         self._point(first.azimuth_degrees, first.elevation_degrees, report, force=True)
 
-        # Step 4: start capture at the configured recording margin.
         recording_start = _to_datetime(plan.recording_start)
         recording_end = _to_datetime(plan.recording_end)
         self._wait_until(recording_start, stop)
@@ -171,13 +151,10 @@ class StationPassHandler:
 
         self._start_capture(plan, stored, recording_end, report)
 
-        # Step 5: track the satellite through the pass.
         self._track(plan, stop, report)
 
-        # Step 6: let the post-roll elapse before stopping.
         self._wait_until(recording_end, stop)
 
-        # Step 7: finalize the capture.
         result = self._station.stop_capture()
         if result is not None:
             report.capture_result = result
@@ -202,8 +179,6 @@ class StationPassHandler:
         try:
             available = free_bytes(self._recordings)
         except OSError:
-            # Unable to measure: attempt the pass rather than refusing one
-            # that might have been fine.
             return None
 
         if available < estimate + RESERVE_BYTES:
@@ -236,16 +211,10 @@ class StationPassHandler:
             command = satdump.build_live_command(
                 pipeline, str(output), plan.radio.frequency_hz, radio)
             if mode == passplan_pb2.RECORDING_MODE_RAW_AND_PROCESS:
-                # One RTL-SDR cannot feed two SatDump processes, and this
-                # build offers no verified way to save baseband while
-                # decoding live, so the decode runs and the shortfall is
-                # recorded rather than silently ignored.
                 report.problems.append(
                     "raw_and_process ran as live decode only: "
                     "simultaneous baseband capture is unavailable with one SDR")
 
-        # Let SatDump bound its own run as well as our stop, so a Worker crash
-        # cannot leave a capture running forever.
         remaining = int((recording_end - self._clock()).total_seconds())
         if remaining > 0:
             command = command + ["--timeout", str(remaining + SATDUMP_GRACE_SECONDS)]
@@ -283,14 +252,9 @@ class StationPassHandler:
                 return
 
         try:
-            # track_to clamps: a real pass dips slightly below the horizon at
-            # its edges, which is not a caller error.
             rotator.track_to(azimuth, elevation)
             report.pointing_commands += 1
         except RotatorError as error:
-            # Report once. A broken serial link fails at every track point, and
-            # keying the check on the full message would not deduplicate it
-            # because each message names a different commanded angle.
             report.pointing_failures += 1
             if report.pointing_failures == 1:
                 report.problems.append(f"pointing failed: {error}")
@@ -310,7 +274,6 @@ class StationPassHandler:
         except HardwareError as error:
             logger.error("parking after the pass failed: %s", error)
 
-    # Helpers --------------------------------------------------------------
 
     def _wait_until(self, moment: datetime, stop: threading.Event) -> None:
         remaining = (moment - self._clock()).total_seconds()
@@ -328,8 +291,6 @@ class StationPassHandler:
             return False
         if report.capture_result is None:
             return False
-        # A capture the Worker stopped on purpose at the end of the window is
-        # the normal, successful path.
         return report.capture_result.succeeded or report.capture_result.terminated
 
 

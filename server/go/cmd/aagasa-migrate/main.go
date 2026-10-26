@@ -1,11 +1,3 @@
-// Command aagasa-migrate applies Aagasa's PostgreSQL schema migrations.
-//
-// Schema changes are a deliberate operational step, separate from running the
-// Server (RULES.md section 18).
-//
-//	aagasa-migrate up
-//	aagasa-migrate version
-//	aagasa-migrate down-to <version>
 package main
 
 import (

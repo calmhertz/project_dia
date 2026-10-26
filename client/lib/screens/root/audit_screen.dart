@@ -7,10 +7,6 @@ import '../../widgets/formatting.dart';
 import '../../widgets/states.dart';
 import '../satellites_screen.dart' show describeError;
 
-/// The audit trail, Root only.
-///
-/// Append-only by construction: there is nothing here that edits or removes a
-/// record, because the trail is evidence (spec.md section 17.3).
 class AuditScreen extends StatefulWidget {
   const AuditScreen({super.key});
 
@@ -23,8 +19,6 @@ class _AuditScreenState extends State<AuditScreen> {
   _future;
   String? _action;
 
-  /// The actions worth filtering by day to day. Any other action still
-  /// appears in the unfiltered list.
   static const _filters = <String, String>{
     'auth.login_failed': 'Failed sign-ins',
     'user.created': 'Accounts created',
@@ -45,8 +39,6 @@ class _AuditScreenState extends State<AuditScreen> {
     setState(() {
       _future = () async {
         final records = await api.auditTrail(action: _action);
-        // Names make the trail readable; an account that has since been
-        // deleted keeps its identifier rather than disappearing.
         Map<String, String> actors = {};
         try {
           actors = {
@@ -162,9 +154,6 @@ class _AuditScreenState extends State<AuditScreen> {
     return Icons.fact_check_outlined;
   }
 
-  /// Wire names read badly in a list; these are the ones an operator sees
-  /// most. Anything unmapped falls back to the recorded action itself, which
-  /// is better than hiding it.
   static String _describe(String action) => switch (action) {
     'auth.login' => 'Signed in',
     'auth.login_failed' => 'Failed sign-in',

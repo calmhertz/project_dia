@@ -38,11 +38,6 @@ type trackPointView struct {
 	RangeKm          float64   `json:"range_km"`
 }
 
-// handlePredictSatellitePasses lists upcoming passes for one satellite over
-// the configured station.
-//
-// Read-only: it computes nothing itself and reserves nothing. Requesting and
-// approving a pass is V7.
 func (s *Server) handlePredictSatellitePasses(w http.ResponseWriter, r *http.Request) {
 	id, ok := s.pathUUID(w, r)
 	if !ok {
@@ -64,8 +59,6 @@ func (s *Server) handlePredictSatellitePasses(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// The prediction is built from the exact stored element set, so it is
-	// reproducible against that TLE version.
 	record, err := s.catalog.CurrentTLE(r.Context(), satellite.ID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -112,8 +105,6 @@ func (s *Server) handlePredictSatellitePasses(w http.ResponseWriter, r *http.Req
 			writeError(s.logger, w, http.StatusBadRequest, "invalid_request", "prediction rejected the request")
 			return
 		}
-		// The prediction service is an internal dependency; its outage is not
-		// the client's fault.
 		s.logger.Error("prediction failed", "error", err.Error())
 		writeError(s.logger, w, http.StatusBadGateway, "prediction_unavailable",
 			"the prediction service is unavailable")
@@ -148,7 +139,6 @@ func (s *Server) handlePredictSatellitePasses(w http.ResponseWriter, r *http.Req
 	})
 }
 
-// intQuery reads a bounded integer query parameter.
 func (s *Server) intQuery(w http.ResponseWriter, r *http.Request, name string, fallback, low, high int) (int, bool) {
 	raw := r.URL.Query().Get(name)
 	if raw == "" {

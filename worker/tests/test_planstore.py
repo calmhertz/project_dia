@@ -53,7 +53,6 @@ def test_stores_and_reads_back_a_plan(store):
     assert stored.aos == BASE + timedelta(hours=2)
 
 
-# The central durability requirement: a restart must not erase future work.
 def test_plans_survive_a_restart(tmp_path):
     first = PlanStore(tmp_path)
     first.replace_desired_state([
@@ -62,7 +61,6 @@ def test_plans_survive_a_restart(tmp_path):
     ], "set-1")
     first.close()
 
-    # A brand new process opening the same directory.
     second = PlanStore(tmp_path)
     try:
         assert second.generation == "set-1"
@@ -89,7 +87,6 @@ def test_execution_state_survives_a_restart(tmp_path):
         second.close()
 
 
-# Reconciliation -----------------------------------------------------------
 
 def test_resync_adds_updates_and_cancels(store):
     store.replace_desired_state([
@@ -106,18 +103,15 @@ def test_resync_adds_updates_and_cancels(store):
 
     assert summary == {"added": 1, "updated": 1, "unchanged": 1, "cancelled": 1}
     assert store.generation == "set-2"
-    # A plan removed from the desired state is cancelled, not deleted.
     dropped = store.get("drop")
     assert dropped.state == ExecutionState.CANCELLED
     assert "removed from desired state" in dropped.detail
 
 
-# Global test property 9: a completed pass is never replayed.
 def test_resync_does_not_resurrect_a_completed_pass(store):
     store.replace_desired_state([plan_dict("pass-1", BASE)], "set-1")
     store.mark_finished("pass-1", ExecutionState.COMPLETED)
 
-    # The Server sends the same pass again, with different content.
     store.replace_desired_state(
         [plan_dict("pass-1", BASE, generation="gen-changed")], "set-2")
 
@@ -145,13 +139,11 @@ def test_unchanged_plan_keeps_its_state(store):
     assert store.get("pass-1").state == ExecutionState.EXECUTING
 
 
-# A partially applied reconciliation would leave the Worker with a schedule
-# that matches neither side.
 def test_a_failed_reconciliation_leaves_the_previous_state(store):
     store.replace_desired_state([plan_dict("pass-1", BASE + timedelta(hours=2))], "set-1")
 
     broken = plan_dict("pass-2", BASE + timedelta(hours=3))
-    broken["encoded"] = object()  # not storable
+    broken["encoded"] = object()
 
     with pytest.raises(Exception):
         store.replace_desired_state([broken], "set-2")
@@ -160,7 +152,6 @@ def test_a_failed_reconciliation_leaves_the_previous_state(store):
     assert store.get("pass-1") is not None
 
 
-# Queue ordering -----------------------------------------------------------
 
 def test_next_due_returns_the_soonest_pending_pass(store):
     store.replace_desired_state([
@@ -190,13 +181,11 @@ def test_next_due_skips_terminal_passes(store):
     assert store.next_due(BASE).pass_id == "live"
 
 
-# Claiming -----------------------------------------------------------------
 
 def test_a_pass_can_only_be_claimed_once(store):
     store.replace_desired_state([plan_dict("pass-1", BASE)], "set-1")
 
     assert store.mark_executing("pass-1", BASE) is True
-    # A second claim, from a restart or a second executor, is refused.
     assert store.mark_executing("pass-1", BASE) is False
 
 
@@ -214,7 +203,6 @@ def test_mark_finished_rejects_a_non_terminal_state(store):
         store.mark_finished("pass-1", ExecutionState.EXECUTING)
 
 
-# Missed and interrupted ---------------------------------------------------
 
 def test_missed_marks_only_closed_windows(store):
     store.replace_desired_state([
@@ -229,12 +217,11 @@ def test_missed_marks_only_closed_windows(store):
     assert store.get("open").state == ExecutionState.RECEIVED
 
 
-# spec.md section 20: a pass interrupted by a restart is not resumed midway.
 def test_recovery_fails_an_interrupted_pass_rather_than_resuming_it(tmp_path):
     first = PlanStore(tmp_path)
     first.replace_desired_state([plan_dict("pass-1", BASE + timedelta(hours=4))], "set-1")
     first.mark_executing("pass-1", BASE)
-    first.close()  # simulate a crash mid-pass
+    first.close()
 
     second = PlanStore(tmp_path)
     try:
@@ -244,13 +231,11 @@ def test_recovery_fails_an_interrupted_pass_rather_than_resuming_it(tmp_path):
         stored = second.get("pass-1")
         assert stored.state == ExecutionState.FAILED
         assert "restarted" in stored.detail
-        # And it does not come back as pending work.
         assert second.pending() == []
     finally:
         second.close()
 
 
-# History ------------------------------------------------------------------
 
 def test_history_records_every_transition(store):
     store.replace_desired_state([plan_dict("pass-1", BASE)], "set-1")
@@ -264,7 +249,6 @@ def test_history_records_every_transition(store):
     assert history[-1].detail == "decoded 42 frames"
 
 
-# Results gathered offline must survive until the Server can take them.
 def test_unsynced_history_survives_a_restart(tmp_path):
     first = PlanStore(tmp_path)
     first.replace_desired_state([plan_dict("pass-1", BASE)], "set-1")

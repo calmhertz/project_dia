@@ -1,5 +1,3 @@
-# Aagasa Server: Go control plane plus the internal Python prediction service.
-# Built from the repository root: podman build -f deploy/server/Containerfile .
 
 FROM docker.io/library/golang:1.27 AS go-build
 WORKDIR /src
@@ -19,12 +17,8 @@ RUN cd /app/server/python && uv sync --frozen --no-dev
 COPY --from=go-build /out/aagasa-server /usr/local/bin/aagasa-server
 COPY --from=go-build /out/aagasa-migrate /usr/local/bin/aagasa-migrate
 
-# The built Flutter client is served by the Server at the root of :8080.
-# Build it with `./deploy.sh web-build`, which publishes client/build/web to
-# deploy/server/web before this image is built.
 COPY deploy/server/web /app/web
 
-# Least privilege: the Server never needs root.
 RUN useradd --system --uid 10001 aagasa
 USER aagasa
 

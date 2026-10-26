@@ -10,10 +10,6 @@ import 'root/edit_satellite_dialog.dart';
 import 'satellites_screen.dart' show describeError;
 import 'schedule_pass_screen.dart';
 
-/// Satellite detail and its upcoming passes.
-///
-/// Raw provider and prediction internals stay hidden; a user sees times,
-/// elevations and warnings (client-spec sections 9 and 10).
 class SatelliteDetailScreen extends StatefulWidget {
   const SatelliteDetailScreen({super.key, required this.satelliteId});
 
@@ -36,8 +32,6 @@ class _SatelliteDetailScreenState extends State<SatelliteDetailScreen> {
   void _load() {
     final api = context.read<Session>().api;
     setState(() {
-      // Marked observed so a failure is shown by the page rather than
-      // escaping before its builder attaches.
       _detail = api.satellite(widget.satelliteId)..ignore();
       _passes = api.predictPasses(widget.satelliteId)..ignore();
     });
@@ -49,8 +43,6 @@ class _SatelliteDetailScreenState extends State<SatelliteDetailScreen> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
-  /// Catalogue administration, Root only (spec.md section 17.1). The Server
-  /// refuses these for anyone else whatever the client shows.
   Future<void> _edit(Satellite satellite) async {
     final changed = await showDialog<bool>(
       context: context,
@@ -67,8 +59,6 @@ class _SatelliteDetailScreenState extends State<SatelliteDetailScreen> {
       _report('Display information refreshed.');
       _load();
     } catch (error) {
-      // Enrichment is optional: a provider outage changes nothing that
-      // matters for tracking (spec.md section 11.2).
       _report(describeError(error));
     }
   }
@@ -228,8 +218,6 @@ class _Header extends StatelessWidget {
                   _Fact('Operator', satellite.operator!),
                 if (satellite.countries != null)
                   _Fact('Country', satellite.countries!),
-                // Orbital data freshness matters operationally, so it is shown
-                // as an age rather than a raw epoch.
                 if (tle != null)
                   _Fact(
                     'Orbital data',

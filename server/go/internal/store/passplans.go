@@ -7,7 +7,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// StoredPassPlan is a generated plan as persisted.
 type StoredPassPlan struct {
 	PassID      uuid.UUID
 	Generation  string
@@ -16,10 +15,6 @@ type StoredPassPlan struct {
 	GeneratedAt time.Time
 }
 
-// UpsertPassPlan stores or replaces the plan for a pass.
-//
-// Regenerating an unchanged plan must not churn the row, so an identical
-// generation is left alone and reports false.
 func (r *Repository) UpsertPassPlan(ctx context.Context, plan StoredPassPlan) (bool, error) {
 	var changed bool
 	err := r.db.QueryRow(ctx, `
@@ -35,7 +30,6 @@ func (r *Repository) UpsertPassPlan(ctx context.Context, plan StoredPassPlan) (b
 		plan.PassID, plan.Generation, plan.PlanVersion, plan.Encoded, plan.GeneratedAt,
 	).Scan(&changed)
 	if err != nil {
-		// No row returned means the conflicting row was identical.
 		if isNoRows(err) {
 			return false, nil
 		}
@@ -44,7 +38,6 @@ func (r *Repository) UpsertPassPlan(ctx context.Context, plan StoredPassPlan) (b
 	return changed, nil
 }
 
-// GetPassPlan returns the stored plan for a pass.
 func (r *Repository) GetPassPlan(ctx context.Context, passID uuid.UUID) (StoredPassPlan, error) {
 	var plan StoredPassPlan
 	err := r.db.QueryRow(ctx, `
@@ -54,8 +47,6 @@ func (r *Repository) GetPassPlan(ctx context.Context, passID uuid.UUID) (StoredP
 	return plan, translate(err)
 }
 
-// ListPassPlansForStation returns stored plans for a station's future passes,
-// soonest first. This is the basis of the Worker's desired state.
 func (r *Repository) ListPassPlansForStation(ctx context.Context, stationID uuid.UUID,
 	notBefore time.Time) ([]StoredPassPlan, error) {
 	rows, err := r.db.Query(ctx, `
@@ -83,7 +74,6 @@ func (r *Repository) ListPassPlansForStation(ctx context.Context, stationID uuid
 	return plans, translate(rows.Err())
 }
 
-// DeletePassPlan removes a plan, used when a pass stops being executable.
 func (r *Repository) DeletePassPlan(ctx context.Context, passID uuid.UUID) error {
 	_, err := r.db.Exec(ctx, `DELETE FROM pass_plans WHERE pass_id = $1`, passID)
 	return translate(err)

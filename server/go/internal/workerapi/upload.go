@@ -20,18 +20,8 @@ import (
 	"aagasa/internal/store"
 )
 
-// maxRecordingBytes bounds a single upload so a runaway Worker cannot fill the
-// Server's disk in one call.
-const maxRecordingBytes = 8 << 30 // 8 GiB
+const maxRecordingBytes = 8 << 30
 
-// UploadRecording receives one recording.
-//
-// Idempotency is the point of this method (spec.md section 19.3). The Worker
-// computes a deterministic recording id, so a retry after a lost
-// acknowledgement arrives with the same id and must not create a second
-// logical recording. The content is written to a temporary file and moved into
-// place only after the checksum matches, so a failed transfer never leaves a
-// partial file where a good one should be.
 func (s *Service) UploadRecording(stream workerv1.WorkerService_UploadRecordingServer) error {
 	first, err := stream.Recv()
 	if err != nil {
@@ -47,8 +37,6 @@ func (s *Service) UploadRecording(stream workerv1.WorkerService_UploadRecordingS
 		return err
 	}
 
-	// A recording the Server already holds is an accepted retry. Answering
-	// before reading the body saves transferring it again.
 	if existing, err := s.repo.GetRecording(stream.Context(), metadata.GetRecordingId()); err == nil {
 		s.logger.Info("recording already held; upload is a retry",
 			slog.String("recording_id", existing.RecordingID))
@@ -62,9 +50,6 @@ func (s *Service) UploadRecording(stream workerv1.WorkerService_UploadRecordingS
 		return status.Error(codes.Internal, "could not check for an existing recording")
 	}
 
-	// Refuse before reading the body rather than filling the disk and
-	// failing halfway. The Worker keeps its copy and retries, so a refusal
-	// costs nothing but a delay (worker-spec section 15).
 	if err := s.files.EnsureSpaceFor(int64(metadata.GetSizeBytes())); err != nil {
 		s.logger.Warn("refusing upload; the recording disk is nearly full",
 			slog.String("pass_id", passID.String()),
@@ -85,8 +70,6 @@ func (s *Service) UploadRecording(stream workerv1.WorkerService_UploadRecordingS
 	}
 
 	if checksum != metadata.GetChecksumSha256() {
-		// A corrupted transfer must not be stored; the Worker keeps its copy
-		// and can retry.
 		_ = os.Remove(destination)
 		return status.Error(codes.DataLoss, "checksum mismatch; the transfer was corrupted")
 	}
@@ -131,15 +114,11 @@ func (s *Service) UploadRecording(stream workerv1.WorkerService_UploadRecordingS
 
 	return stream.SendAndClose(&workerv1.UploadRecordingResponse{
 		RecordingId: recording.RecordingID,
-		// A concurrent duplicate lost the insert race; still a success.
 		Stored:    inserted,
 		SizeBytes: uint64(written),
 	})
 }
 
-// receiveContent streams the body to a temporary file, then moves it into
-// place. Writing directly to the destination would leave a partial file behind
-// if the connection dropped.
 func (s *Service) receiveContent(stream workerv1.WorkerService_UploadRecordingServer,
 	destination string) (int64, string, error) {
 	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
@@ -153,7 +132,6 @@ func (s *Service) receiveContent(stream workerv1.WorkerService_UploadRecordingSe
 		return 0, "", status.Error(codes.Internal, "could not prepare storage")
 	}
 	temporaryPath := temporary.Name()
-	// Remove the temporary file unless it was renamed into place.
 	defer func() {
 		temporary.Close()
 		_ = os.Remove(temporaryPath)
@@ -190,8 +168,6 @@ func (s *Service) receiveContent(stream workerv1.WorkerService_UploadRecordingSe
 		hash.Write(chunk)
 	}
 
-	// Flush to disk before the rename, so a crash cannot leave a named file
-	// with unwritten content.
 	if err := temporary.Sync(); err != nil {
 		return 0, "", status.Error(codes.Internal, "could not flush the recording")
 	}
@@ -206,7 +182,6 @@ func (s *Service) receiveContent(stream workerv1.WorkerService_UploadRecordingSe
 	return written, hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-// validateUpload checks the metadata before any content is accepted.
 func (s *Service) validateUpload(metadata *workerv1.RecordingMetadata) (uuid.UUID, uuid.UUID, error) {
 	if !isHex64(metadata.GetRecordingId()) {
 		return uuid.Nil, uuid.Nil, status.Error(codes.InvalidArgument,
@@ -238,11 +213,6 @@ func isHex64(value string) bool {
 	return err == nil
 }
 
-// ReportExecutions records pass outcomes the Worker gathered, including while
-// the Server was unreachable.
-//
-// Re-reporting is safe: a pass that already reached a terminal state is left
-// alone rather than rewritten (spec.md section 14).
 func (s *Service) ReportExecutions(ctx context.Context,
 	request *workerv1.ReportExecutionsRequest) (*workerv1.ReportExecutionsResponse, error) {
 	accepted := 0
@@ -266,8 +236,6 @@ func (s *Service) ReportExecutions(ctx context.Context,
 				slog.String("pass_id", passID.String()), slog.String("error", err.Error()))
 			return nil, status.Error(codes.Internal, "could not record the outcome")
 		}
-		// Counted either way: an already-recorded outcome is accepted, so the
-		// Worker stops resending it.
 		accepted++
 		if changed {
 			s.logger.Info("pass outcome recorded",
@@ -290,8 +258,6 @@ func (s *Service) ReportExecutions(ctx context.Context,
 	return &workerv1.ReportExecutionsResponse{Accepted: uint32(accepted)}, nil
 }
 
-// passStatusFor maps a Worker execution state onto the Server's pass
-// lifecycle. Worker-only states have no Server equivalent and are ignored.
 func passStatusFor(workerState string) (domain.PassStatus, bool) {
 	switch workerState {
 	case "completed":
@@ -301,7 +267,6 @@ func passStatusFor(workerState string) (domain.PassStatus, bool) {
 	case "missed":
 		return domain.PassMissed, true
 	case "cancelled":
-		// The Server already knows: cancellation originates there.
 		return "", false
 	default:
 		return "", false

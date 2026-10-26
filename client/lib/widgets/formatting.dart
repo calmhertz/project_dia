@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-/// Readable, unambiguous time and status formatting (client-spec section 32).
 
 const _months = [
   'Jan',
@@ -17,8 +16,6 @@ const _months = [
   'Dec',
 ];
 
-/// Times are shown in the viewer's local zone, labelled, because an operator
-/// reading a schedule should not have to convert in their head.
 String formatDateTime(DateTime moment) {
   final local = moment.toLocal();
   return '${local.day} ${_months[local.month - 1]} ${local.year}, '
@@ -67,8 +64,6 @@ String formatBytes(int bytes) {
   return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
 }
 
-/// A pass status shown as text plus an icon, never colour alone.
-/// What a pass is set to produce, in words rather than the wire value.
 String describeRecordingMode(String mode) => switch (mode) {
   'raw' => 'Raw recording',
   'process' => 'Processed result',

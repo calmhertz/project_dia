@@ -7,11 +7,6 @@ import '../../widgets/formatting.dart';
 import '../../widgets/states.dart';
 import '../satellites_screen.dart' show describeError;
 
-/// The complete station configuration, Root only (client-spec section 29).
-///
-/// Every section says plainly what a change affects, and a change never
-/// rewrites work that is already committed: the Server reports how many
-/// passes stand under the old settings and leaves them alone.
 class ConfigurationScreen extends StatefulWidget {
   const ConfigurationScreen({super.key});
 
@@ -45,7 +40,6 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
-  /// Runs a change and reports what it did or why it was refused.
   Future<bool> _apply(Future<String> Function() change) async {
     try {
       _report(await change());
@@ -129,8 +123,6 @@ class _ConfigurationScreenState extends State<ConfigurationScreen> {
               settings: scheduling,
               onSave: (changes) => _apply(() async {
                 final effective = await api.updateSchedulingConfig(changes);
-                // spec.md section 13.6: a shorter lead time cannot be used to
-                // book something sooner than the old rule allowed.
                 return 'Saved. In force from ${formatDateTime(effective)}.';
               }),
             ),
@@ -173,7 +165,6 @@ class _Notice extends StatelessWidget {
   }
 }
 
-/// A titled group of fields with one save button.
 class _Section extends StatefulWidget {
   const _Section({
     required this.title,
@@ -187,11 +178,8 @@ class _Section extends StatefulWidget {
   final String explanation;
   final List<Widget> fields;
 
-  /// Returns true when the change was accepted.
   final Future<bool> Function() onSave;
 
-  /// Names the scope of this button, because the configuration screen has
-  /// several independent Save buttons and "Save" alone is ambiguous.
   final String saveLabel;
 
   @override
@@ -463,8 +451,6 @@ class _BandSectionState extends State<_BandSection> {
           'ppm_correction': int.tryParse(_ppm.text) ?? 0,
           'bias_tee_enabled': _biasTee,
         };
-        // Sent only when given: the Server treats an absent field as
-        // unchanged, and zero is not a valid sample rate or gain.
         final frequency = int.tryParse(_frequency.text);
         if (frequency != null) changes['center_frequency_hz'] = frequency;
         final rate = int.tryParse(_sampleRate.text);
@@ -521,8 +507,6 @@ class _HardwareSectionState extends State<_HardwareSection> {
     super.dispose();
   }
 
-  /// The G-550's real limits, checked here so an impossible angle is caught
-  /// before it is sent anywhere (spec.md section 9). The Server checks again.
   String? _validate(int azimuth, int elevation) {
     if (azimuth < 0 || azimuth > 359) {
       return 'Park azimuth must be between 0 and 359 degrees.';
@@ -668,8 +652,6 @@ class _SchedulingSectionState extends State<_SchedulingSection> {
           'old rule allowed.',
       saveLabel: 'Save scheduling',
       fields: [
-        // A saved change is invisible until it becomes effective, which
-        // reads exactly like a save that failed.
         if (widget.settings.pending != null) ...[
           _PendingChange(pending: widget.settings.pending!),
           const SizedBox(height: 16),
@@ -765,7 +747,6 @@ class _Field extends StatelessWidget {
   }
 }
 
-/// A scheduling change that is saved but not yet in force.
 class _PendingChange extends StatelessWidget {
   const _PendingChange({required this.pending});
 

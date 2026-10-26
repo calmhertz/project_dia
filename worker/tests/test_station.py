@@ -22,7 +22,6 @@ def make_stub(tmp_path, name: str, body: str) -> str:
     return str(path)
 
 
-# RTL-SDR probing -----------------------------------------------------------
 
 def test_no_devices_is_reported_not_raised(tmp_path):
     stub = make_stub(tmp_path, "rtl_test_none.py", """
@@ -82,11 +81,9 @@ def test_real_rtl_test_runs_if_installed():
     if shutil.which("rtl_test") is None:
         pytest.skip("rtl_test is not installed")
 
-    # Must not raise regardless of whether hardware is attached.
     assert isinstance(RTLSDRProbe().list_devices(), list)
 
 
-# Station lifecycle ---------------------------------------------------------
 
 class RecordingSerial:
     def __init__(self, writes, fail=False):
@@ -142,8 +139,6 @@ def build_station(tmp_path, writes, rotator_fails=False, sdr_present=False):
     return station, satdump_stub
 
 
-# worker-spec section 11.1: after any restart the antenna position is unknown,
-# so startup establishes a known one.
 def test_safe_startup_parks_the_rotator(tmp_path):
     writes = []
     station, _ = build_station(tmp_path, writes, sdr_present=True)
@@ -158,7 +153,6 @@ def test_safe_startup_parks_the_rotator(tmp_path):
     assert status.last_commanded_position == (180, 10)
 
 
-# A missing device must be reported, not crash the Worker.
 def test_safe_startup_continues_when_hardware_is_missing(tmp_path):
     writes = []
     station, _ = build_station(tmp_path, writes, rotator_fails=True, sdr_present=False)
@@ -169,7 +163,6 @@ def test_safe_startup_continues_when_hardware_is_missing(tmp_path):
     assert status.rotator_error
     assert status.sdr_available is False
     assert status.sdr_error
-    # SatDump is still discoverable, so one missing device does not hide the rest.
     assert status.satdump_available is True
 
 
@@ -199,7 +192,6 @@ def test_safe_shutdown_parks_even_if_capture_stop_fails(tmp_path):
     station, stub = build_station(tmp_path, writes, sdr_present=True)
     station.start_capture([stub])
 
-    # Simulate a stop path that blows up; parking must still happen.
     def exploding_stop(process, grace_seconds=10):
         raise RuntimeError("stop failed")
 
@@ -213,11 +205,9 @@ def test_safe_shutdown_does_not_raise_when_rotator_is_gone(tmp_path):
     writes = []
     station, _ = build_station(tmp_path, writes, rotator_fails=True)
 
-    # Must not raise: shutdown is best effort across every device.
     station.safe_shutdown()
 
 
-# worker-spec section 12: the station has one RTL-SDR, so one capture.
 def test_second_concurrent_capture_is_refused(tmp_path):
     writes = []
     station, stub = build_station(tmp_path, writes, sdr_present=True)
@@ -239,7 +229,6 @@ def test_capture_can_be_restarted_after_stopping(tmp_path):
     assert result.terminated is True
     assert station.capture_active is False
 
-    # The device is free again.
     station.start_capture([stub])
     station.safe_shutdown()
 
@@ -262,7 +251,6 @@ def test_finished_capture_is_reaped_before_starting_another(tmp_path):
     time.sleep(0.4)
     assert station.capture_active is False
 
-    # Starting again must succeed and must not leave a zombie behind.
     station.start_capture([quick])
     time.sleep(0.4)
     station.safe_shutdown()

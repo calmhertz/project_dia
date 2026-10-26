@@ -9,10 +9,8 @@ import '../screens/satellites_screen.dart';
 import '../state/session.dart';
 import 'destinations.dart';
 
-/// MD3 compact breakpoint: below this a navigation bar, above it a rail.
 const double _compactWidthLimit = 600;
 
-/// The signed-in shell.
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
 
@@ -41,13 +39,9 @@ class _AppShellState extends State<AppShell> {
     final destinations = destinationsFor(
       isAdmin: session.user?.isAdmin ?? false,
     );
-    // A role change must not leave a selection pointing past the end of the
-    // list the user can now see.
     final selected = _selectedIndex.clamp(0, destinations.length - 1);
     final destination = destinations[selected];
 
-    // Keyed so switching destinations rebuilds the screen and refetches,
-    // rather than showing another screen's stale data.
     final body = KeyedSubtree(
       key: ValueKey(destination.label),
       child: _screenFor(destination.label),

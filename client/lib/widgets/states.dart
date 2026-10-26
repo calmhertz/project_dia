@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-/// Every screen has an explicit loading, empty and error state
-/// (client-spec section 24).
 
 class LoadingState extends StatelessWidget {
   const LoadingState({super.key, this.message});
@@ -67,7 +65,6 @@ class EmptyState extends StatelessWidget {
   }
 }
 
-/// An error with a way forward. Never a dead end (client-spec section 24).
 class ErrorState extends StatelessWidget {
   const ErrorState({
     super.key,

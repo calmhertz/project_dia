@@ -20,7 +20,6 @@ func configWith(leadTime, preBuffer, postBuffer time.Duration) domain.Scheduling
 	}
 }
 
-// State machine ------------------------------------------------------------
 
 func TestLifecycleTransitions(t *testing.T) {
 	allowed := []struct{ from, to domain.PassStatus }{
@@ -40,7 +39,6 @@ func TestLifecycleTransitions(t *testing.T) {
 	}
 }
 
-// A completed or missed pass is never replayed (spec.md sections 6.4 and 20).
 func TestTerminalStatesCannotChange(t *testing.T) {
 	terminal := []domain.PassStatus{
 		domain.PassRejected, domain.PassCancelled,
@@ -62,10 +60,8 @@ func TestTerminalStatesCannotChange(t *testing.T) {
 
 func TestNonsenseTransitionsAreRefused(t *testing.T) {
 	refused := []struct{ from, to domain.PassStatus }{
-		// Approval cannot be skipped.
 		{domain.PassPendingApproval, domain.PassExecuting},
 		{domain.PassPendingApproval, domain.PassCompleted},
-		// A rejected pass cannot be resurrected.
 		{domain.PassApproved, domain.PassPendingApproval},
 		{domain.PassExecuting, domain.PassApproved},
 		{domain.PassApproved, domain.PassCompleted},
@@ -81,8 +77,6 @@ func TestNonsenseTransitionsAreRefused(t *testing.T) {
 	}
 }
 
-// The states that hold the station must match the database constraint's
-// WHERE clause, or the application and the database would disagree.
 func TestLiveStatusesMatchTheDatabaseConstraint(t *testing.T) {
 	live := map[domain.PassStatus]bool{
 		domain.PassPendingApproval: true,
@@ -102,7 +96,6 @@ func TestLiveStatusesMatchTheDatabaseConstraint(t *testing.T) {
 	}
 }
 
-// Buffers and overlap ------------------------------------------------------
 
 func TestReservationAppliesBuffers(t *testing.T) {
 	aos := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
@@ -119,7 +112,6 @@ func TestReservationAppliesBuffers(t *testing.T) {
 	}
 }
 
-// The example from spec.md section 13.3.
 func TestOverlapMatchesTheSpecExample(t *testing.T) {
 	base := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
 	passA := scheduling.Reservation{From: base, To: base.Add(15 * time.Minute)}
@@ -130,8 +122,6 @@ func TestOverlapMatchesTheSpecExample(t *testing.T) {
 	}
 }
 
-// Half-open ranges: touching reservations do not conflict. This must agree
-// with the database's tstzrange '[)' bound.
 func TestTouchingReservationsDoNotOverlap(t *testing.T) {
 	base := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
 	first := scheduling.Reservation{From: base, To: base.Add(15 * time.Minute)}
@@ -152,7 +142,6 @@ func TestContainedReservationOverlaps(t *testing.T) {
 	}
 }
 
-// Lead time ----------------------------------------------------------------
 
 func TestLeadTimeRejectsPassesStartingTooSoon(t *testing.T) {
 	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
@@ -164,7 +153,6 @@ func TestLeadTimeRejectsPassesStartingTooSoon(t *testing.T) {
 	if err := scheduling.CheckLeadTime(now, now.Add(31*time.Minute), config); err != nil {
 		t.Errorf("31 minutes ahead should be allowed, got %v", err)
 	}
-	// Exactly at the boundary is allowed.
 	if err := scheduling.CheckLeadTime(now, now.Add(30*time.Minute), config); err != nil {
 		t.Errorf("exactly the lead time should be allowed, got %v", err)
 	}
@@ -179,9 +167,6 @@ func TestLeadTimeRejectsPassesInThePast(t *testing.T) {
 	}
 }
 
-// spec.md section 13.6 and global test property 5: a newly chosen lead time
-// becomes usable only after that lead time has elapsed, so shortening it
-// cannot be used to book something sooner than the old rule allowed.
 func TestShorteningTheLeadTimeCannotBeUsedImmediately(t *testing.T) {
 	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
 	current := 30 * time.Minute
@@ -192,15 +177,11 @@ func TestShorteningTheLeadTimeCannotBeUsedImmediately(t *testing.T) {
 	if !effectiveFrom.Equal(now.Add(shortened)) {
 		t.Errorf("effectiveFrom = %s, want now plus the new lead time", effectiveFrom)
 	}
-	// The new policy is not usable at the moment of the change.
 	if !effectiveFrom.After(now) {
 		t.Error("a new configuration must not be usable immediately")
 	}
 }
 
-// A longer lead time is a tightening, so it applies at once. Delaying it
-// would leave the looser rule in force for exactly as long as the new value,
-// and an operator repeating the change would never see it take effect.
 func TestLengtheningTheLeadTimeAppliesImmediately(t *testing.T) {
 	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
 	current := time.Minute
@@ -213,8 +194,6 @@ func TestLengtheningTheLeadTimeAppliesImmediately(t *testing.T) {
 	}
 }
 
-// Changing something else while leaving the lead time alone is not a bypass
-// either.
 func TestAnUnchangedLeadTimeAppliesImmediately(t *testing.T) {
 	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
 	same := 30 * time.Minute
@@ -224,9 +203,7 @@ func TestAnUnchangedLeadTimeAppliesImmediately(t *testing.T) {
 	}
 }
 
-// Band mismatch ------------------------------------------------------------
 
-// spec.md section 8: a band mismatch warns, it does not conflict.
 func TestBandMismatchProducesAWarningNotAnError(t *testing.T) {
 	warning := scheduling.BandMismatchWarning(domain.BandVHF, domain.BandUHF)
 	if warning == nil {
@@ -235,7 +212,6 @@ func TestBandMismatchProducesAWarningNotAnError(t *testing.T) {
 	if warning.Code != "band_mismatch" {
 		t.Errorf("Code = %q", warning.Code)
 	}
-	// The message must name both bands so the operator knows what to change.
 	if !strings.Contains(warning.Message, "UHF") || !strings.Contains(warning.Message, "VHF") {
 		t.Errorf("Message does not name both bands: %q", warning.Message)
 	}
@@ -247,7 +223,6 @@ func TestMatchingBandProducesNoWarning(t *testing.T) {
 	}
 }
 
-// Visibility ---------------------------------------------------------------
 
 func TestPrivatePassVisibility(t *testing.T) {
 	owner := domain.User{ID: uuid.New(), Role: domain.RoleUser}

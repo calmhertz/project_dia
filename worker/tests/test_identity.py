@@ -52,7 +52,6 @@ def test_registration_resolves_and_caches_the_identity():
 
     assert identity.worker_id == "worker-uuid"
     assert identity.station_name == "Test Station"
-    # Cached, so a restart during an outage still knows who it is.
     assert store.identity == identity
     assert store.saves == 1
 
@@ -71,10 +70,6 @@ def test_an_unchanged_identity_is_not_rewritten():
 
 
 
-# The pipeline inventory -----------------------------------------------------
-#
-# The Server has no SatDump of its own, so registration is the only moment it
-# learns what this station can run (server-spec section 21).
 
 def test_registration_reports_the_pipeline_inventory():
     client = RecordingClient()

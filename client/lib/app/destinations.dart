@@ -1,10 +1,5 @@
 import 'package:flutter/material.dart';
 
-/// A top-level area of the app.
-///
-/// The information architecture from client-spec section 5. Administration is
-/// role dependent: it is offered only to Admin and Root, for usability. The
-/// Server refuses the underlying requests regardless of what is shown.
 class AppDestination {
   const AppDestination({
     required this.label,
@@ -17,7 +12,6 @@ class AppDestination {
   final IconData icon;
   final IconData selectedIcon;
 
-  /// Shown to Admin and Root only.
   final bool adminOnly;
 }
 
@@ -55,7 +49,6 @@ const List<AppDestination> _allDestinations = [
   ),
 ];
 
-/// The destinations this user may use.
 List<AppDestination> destinationsFor({required bool isAdmin}) => [
   for (final destination in _allDestinations)
     if (isAdmin || !destination.adminOnly) destination,

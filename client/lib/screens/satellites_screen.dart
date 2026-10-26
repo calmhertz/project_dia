@@ -8,10 +8,6 @@ import '../widgets/states.dart';
 import 'root/add_satellite_dialog.dart';
 import 'satellite_detail_screen.dart';
 
-/// The satellite catalogue.
-///
-/// Metadata is enrichment, so every field is optional and the list must read
-/// well without it (client-spec section 8).
 class SatellitesScreen extends StatefulWidget {
   const SatellitesScreen({super.key});
 
@@ -32,14 +28,10 @@ class _SatellitesScreenState extends State<SatellitesScreen> {
   void _reload() {
     final api = context.read<Session>().api;
     setState(() {
-      // A block body, not an arrow: an arrow would hand setState the future
-      // as its return value, which Flutter rejects.
       _future = api.satellites()..ignore();
     });
   }
 
-  /// Root adds satellites; everyone else reads the catalogue
-  /// (spec.md section 17.1).
   Future<void> _add() async {
     final added = await showDialog<bool>(
       context: context,
@@ -187,7 +179,6 @@ class _SatelliteTile extends StatelessWidget {
   }
 }
 
-/// Turns any thrown error into something worth showing a user.
 String describeError(Object? error) {
   if (error is ApiException) return error.message;
   if (error is NetworkException) return error.message;

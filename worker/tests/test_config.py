@@ -27,7 +27,6 @@ def test_defaults(valid_env):
     config = load_config()
     assert config.rotator_baud_rate == 9600
     assert config.heartbeat_interval_seconds == 5
-    # TLS must be on unless the deployment explicitly disables it.
     assert config.server_tls_enabled is True
 
 

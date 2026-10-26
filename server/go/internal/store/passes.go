@@ -10,21 +10,15 @@ import (
 	"aagasa/internal/domain"
 )
 
-// PassFilter narrows a pass listing.
 type PassFilter struct {
-	// RequestedBy limits to one owner. Nil means no owner filter.
 	RequestedBy *uuid.UUID
-	// Statuses limits to these states. Empty means any state.
 	Statuses []domain.PassStatus
-	// From and To bound the pass by AOS. Zero means unbounded.
 	From time.Time
 	To   time.Time
-	// OnlyPublic limits to publicly visible passes.
 	OnlyPublic bool
 	Limit      int
 }
 
-// ListPasses returns passes matching the filter, soonest first.
 func (r *Repository) ListPasses(ctx context.Context, filter PassFilter) ([]domain.Pass, error) {
 	query := `SELECT ` + passColumns + ` FROM passes WHERE true`
 	args := []any{}
@@ -72,11 +66,6 @@ func (r *Repository) ListPasses(ctx context.Context, filter PassFilter) ([]domai
 	return passes, translate(rows.Err())
 }
 
-// FindConflictingPasses returns live passes whose reservation overlaps the
-// given window on the same station.
-//
-// The database constraint is what actually prevents a conflict; this exists to
-// report which passes are in the way, and for Root override to act on them.
 func (r *Repository) FindConflictingPasses(ctx context.Context, stationID uuid.UUID,
 	from, to time.Time, liveStatuses []domain.PassStatus) ([]domain.Pass, error) {
 	rows, err := r.db.Query(ctx, `
@@ -102,7 +91,6 @@ func (r *Repository) FindConflictingPasses(ctx context.Context, stationID uuid.U
 	return passes, translate(rows.Err())
 }
 
-// ApprovePass records an approval decision.
 func (r *Repository) ApprovePass(ctx context.Context, id, approvedBy uuid.UUID, at time.Time) error {
 	tag, err := r.db.Exec(ctx, `
 		UPDATE passes SET status = 'approved', approved_by = $2, approved_at = $3
@@ -110,15 +98,12 @@ func (r *Repository) ApprovePass(ctx context.Context, id, approvedBy uuid.UUID, 
 	if err != nil {
 		return translate(err)
 	}
-	// Zero rows means the pass moved on between read and write; the caller
-	// re-reads rather than assuming success.
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
 	return nil
 }
 
-// RejectPass records a rejection.
 func (r *Repository) RejectPass(ctx context.Context, id, decidedBy uuid.UUID, at time.Time) error {
 	tag, err := r.db.Exec(ctx, `
 		UPDATE passes SET status = 'rejected', approved_by = $2, approved_at = $3
@@ -132,10 +117,6 @@ func (r *Repository) RejectPass(ctx context.Context, id, decidedBy uuid.UUID, at
 	return nil
 }
 
-// CancelPass marks a pass cancelled with a reason.
-//
-// The row is never deleted: an overridden or cancelled pass stays auditable
-// (spec.md section 13.7).
 func (r *Repository) CancelPass(ctx context.Context, id, cancelledBy uuid.UUID,
 	reason domain.CancellationReason, at time.Time) error {
 	tag, err := r.db.Exec(ctx, `
@@ -152,9 +133,7 @@ func (r *Repository) CancelPass(ctx context.Context, id, cancelledBy uuid.UUID,
 	return nil
 }
 
-// Workers -----------------------------------------------------------------
 
-// GetStationWorker returns the worker bound to a station.
 func (r *Repository) GetStationWorker(ctx context.Context, stationID uuid.UUID) (domain.Worker, error) {
 	row := r.db.QueryRow(ctx, `
 		SELECT `+workerColumns+` FROM workers WHERE station_id = $1 ORDER BY created_at LIMIT 1`,
@@ -162,8 +141,6 @@ func (r *Repository) GetStationWorker(ctx context.Context, stationID uuid.UUID) 
 	return scanWorker(row)
 }
 
-// SetWorkerConnectionState records reachability. V12 drives this from the
-// heartbeat; until then an operator or a test sets it.
 func (r *Repository) SetWorkerConnectionState(ctx context.Context, workerID uuid.UUID,
 	state domain.WorkerConnectionState, seenAt *time.Time) error {
 	tag, err := r.db.Exec(ctx, `
@@ -190,25 +167,20 @@ func itoa(value int) string {
 	return strconv.Itoa(value)
 }
 
-// GetSchedulingConfigByID returns one specific configuration version, so a
-// pass keeps the terms it was accepted under (spec.md section 13.8).
 func (r *Repository) GetSchedulingConfigByID(ctx context.Context, id uuid.UUID) (domain.SchedulingConfig, error) {
 	row := r.db.QueryRow(ctx, `SELECT `+schedulingConfigColumns+` FROM scheduling_configs WHERE id = $1`, id)
 	return scanSchedulingConfig(row)
 }
 
-// Pipeline is a SatDump pipeline record.
 type Pipeline struct {
 	ID             uuid.UUID
 	Name           string
 	IsCustom       bool
 	DefinitionPath string
 	ChecksumSHA256 string
-	// Definition is the pipeline JSON, loaded from disk when required.
 	Definition string
 }
 
-// GetPipelineByID returns a pipeline record without its file contents.
 func (r *Repository) GetPipelineByID(ctx context.Context, id uuid.UUID) (Pipeline, error) {
 	var pipeline Pipeline
 	var path, checksum *string
@@ -228,7 +200,6 @@ func (r *Repository) GetPipelineByID(ctx context.Context, id uuid.UUID) (Pipelin
 	return pipeline, nil
 }
 
-// CreatePipeline registers a SatDump pipeline.
 func (r *Repository) CreatePipeline(ctx context.Context, pipeline Pipeline, uploadedBy *uuid.UUID) (Pipeline, error) {
 	var path, checksum *string
 	if pipeline.DefinitionPath != "" {
@@ -245,7 +216,6 @@ func (r *Repository) CreatePipeline(ctx context.Context, pipeline Pipeline, uplo
 	return pipeline, translate(err)
 }
 
-// HeartbeatUpdate is what a Worker reports when it checks in.
 type HeartbeatUpdate struct {
 	WorkerID       uuid.UUID
 	SeenAt         time.Time
@@ -254,13 +224,11 @@ type HeartbeatUpdate struct {
 	PendingReports int
 }
 
-// GetWorkerByID returns one worker.
 func (r *Repository) GetWorkerByID(ctx context.Context, id uuid.UUID) (domain.Worker, error) {
 	row := r.db.QueryRow(ctx, `SELECT `+workerColumns+` FROM workers WHERE id = $1`, id)
 	return scanWorker(row)
 }
 
-// RecordHeartbeat marks a worker online and notes what it is carrying.
 func (r *Repository) RecordHeartbeat(ctx context.Context, update HeartbeatUpdate) error {
 	tag, err := r.db.Exec(ctx, `
 		UPDATE workers
@@ -281,7 +249,6 @@ func (r *Repository) RecordHeartbeat(ctx context.Context, update HeartbeatUpdate
 	return nil
 }
 
-// RecordWorkerSync notes that a worker has reached the current desired state.
 func (r *Repository) RecordWorkerSync(ctx context.Context, workerID uuid.UUID,
 	at time.Time, generation string) error {
 	_, err := r.db.Exec(ctx, `
@@ -290,8 +257,6 @@ func (r *Repository) RecordWorkerSync(ctx context.Context, workerID uuid.UUID,
 	return translate(err)
 }
 
-// MarkStaleWorkersOffline flips workers that have stopped reporting, returning
-// the names of those that changed so the transition can be logged once.
 func (r *Repository) MarkStaleWorkersOffline(ctx context.Context, cutoff time.Time) ([]string, error) {
 	rows, err := r.db.Query(ctx, `
 		UPDATE workers SET connection_state = 'offline'
@@ -314,7 +279,6 @@ func (r *Repository) MarkStaleWorkersOffline(ctx context.Context, cutoff time.Ti
 	return names, translate(rows.Err())
 }
 
-// ListWorkers returns every worker, for operational views.
 func (r *Repository) ListWorkers(ctx context.Context) ([]domain.Worker, error) {
 	rows, err := r.db.Query(ctx, `SELECT `+workerColumns+` FROM workers ORDER BY name`)
 	if err != nil {
@@ -333,7 +297,6 @@ func (r *Repository) ListWorkers(ctx context.Context) ([]domain.Worker, error) {
 	return workers, translate(rows.Err())
 }
 
-// ListPipelines returns the known pipelines, standard ones first.
 func (r *Repository) ListPipelines(ctx context.Context) ([]Pipeline, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, name, is_custom, definition_path, checksum_sha256
@@ -362,16 +325,8 @@ func (r *Repository) ListPipelines(ctx context.Context) ([]Pipeline, error) {
 	return pipelines, translate(rows.Err())
 }
 
-// ReplaceStandardPipelines records what a Worker's SatDump provides.
-//
-// Standard pipelines are a reflection of an installation, not a catalogue the
-// Server owns, so the set is replaced wholesale. Custom uploads are never
-// touched, and a standard pipeline a pass already references is kept so the
-// pass stays readable.
 func (r *Repository) ReplaceStandardPipelines(ctx context.Context, names []string) (int, error) {
 	if len(names) == 0 {
-		// An empty report means SatDump could not be read, not that the
-		// station has no pipelines. Leave what is known in place.
 		return 0, nil
 	}
 
@@ -397,8 +352,6 @@ func (r *Repository) ReplaceStandardPipelines(ctx context.Context, names []strin
 	return int(removed), nil
 }
 
-// SetPipelineDefinitionPath records where a custom pipeline's JSON was
-// written, once the file exists.
 func (r *Repository) SetPipelineDefinitionPath(ctx context.Context, id uuid.UUID, path string) error {
 	tag, err := r.db.Exec(ctx,
 		`UPDATE satdump_pipelines SET definition_path = $2 WHERE id = $1`, id, path)

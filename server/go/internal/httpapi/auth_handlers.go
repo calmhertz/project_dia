@@ -8,8 +8,6 @@ import (
 	"aagasa/internal/domain"
 )
 
-// userView is the public representation of an account. It never carries the
-// password hash.
 type userView struct {
 	ID                 string    `json:"id"`
 	Username           string    `json:"username"`
@@ -82,8 +80,6 @@ type changePasswordRequest struct {
 	NewPassword     string `json:"new_password"`
 }
 
-// handleChangePassword is reachable while must_change_password is set, because
-// it is the only way out of that state.
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	var request changePasswordRequest
 	if err := decodeJSON(w, r, &request); err != nil {
@@ -97,8 +93,6 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Every existing session for this user becomes stale in spirit; the
-	// current one is revoked so the client must sign in with the new password.
 	if err := s.auth.Logout(r.Context(), currentToken(r)); err != nil {
 		s.internalError(w, "revoke session after password change", err)
 		return

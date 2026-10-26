@@ -71,7 +71,6 @@ def build(store, handler=None, clock=None):
     return Executor(store, handler, clock=clock), handler, clock
 
 
-# Timing -------------------------------------------------------------------
 
 def test_a_pass_far_in_the_future_is_not_executed(store):
     store.replace_desired_state([plan_dict("pass-1", BASE + timedelta(hours=4))], "set-1")
@@ -83,7 +82,7 @@ def test_a_pass_far_in_the_future_is_not_executed(store):
 
 
 def test_a_pass_inside_the_lead_window_is_executed(store):
-    aos = BASE + timedelta(seconds=30)  # inside the 60s lead
+    aos = BASE + timedelta(seconds=30)
     store.replace_desired_state([plan_dict("pass-1", aos)], "set-1")
     executor, handler, _ = build(store)
 
@@ -100,7 +99,7 @@ def test_the_executor_waits_then_runs_as_time_passes(store):
     executor, handler, clock = build(store)
 
     assert executor.tick() is None
-    clock.advance(timedelta(minutes=29, seconds=30))  # now inside the lead
+    clock.advance(timedelta(minutes=29, seconds=30))
     assert executor.tick() is not None
     assert handler.calls == ["pass-1"]
 
@@ -120,7 +119,6 @@ def test_passes_run_in_chronological_order(store):
     assert handler.calls == ["first", "second"]
 
 
-# Outcomes -----------------------------------------------------------------
 
 def test_a_failing_handler_records_failure(store):
     store.replace_desired_state([plan_dict("pass-1", BASE)], "set-1")
@@ -131,7 +129,6 @@ def test_a_failing_handler_records_failure(store):
     assert store.get("pass-1").state == ExecutionState.FAILED
 
 
-# One bad pass must not take the Worker down.
 def test_a_raising_handler_is_contained(store):
     store.replace_desired_state([
         plan_dict("bad", BASE), plan_dict("good", BASE + timedelta(minutes=40)),
@@ -145,14 +142,12 @@ def test_a_raising_handler_is_contained(store):
     assert stored.state == ExecutionState.FAILED
     assert "rotator exploded" in stored.detail
 
-    # The Worker carries on to the next pass.
     handler.raises = None
     clock.advance(timedelta(minutes=40))
     executor.tick()
     assert handler.calls == ["bad", "good"]
 
 
-# Global test property 9: completed and missed passes are not replayed.
 def test_a_completed_pass_is_not_run_twice(store):
     store.replace_desired_state([plan_dict("pass-1", BASE)], "set-1")
     executor, handler, _ = build(store)
@@ -165,7 +160,6 @@ def test_a_completed_pass_is_not_run_twice(store):
 
 
 def test_a_missed_pass_is_never_executed(store):
-    # The window closed while the Worker was asleep.
     store.replace_desired_state([plan_dict("stale", BASE - timedelta(hours=3))], "set-1")
     executor, handler, _ = build(store)
 
@@ -191,7 +185,6 @@ def test_missed_passes_do_not_block_later_ones(store):
     assert store.get("upcoming").state == ExecutionState.COMPLETED
 
 
-# Recovery -----------------------------------------------------------------
 
 def test_recovery_closes_interrupted_and_missed_work(tmp_path):
     first = PlanStore(tmp_path)
@@ -210,7 +203,6 @@ def test_recovery_closes_interrupted_and_missed_work(tmp_path):
 
         assert result["interrupted"] == ["interrupted"]
         assert result["missed"] == ["stale"]
-        # Future work is untouched and still runnable.
         assert [plan.pass_id for plan in second.pending()] == ["future"]
         assert handler.calls == []
     finally:
@@ -236,7 +228,6 @@ def test_recovery_does_not_replay_completed_work(tmp_path):
         second.close()
 
 
-# Sleep pacing -------------------------------------------------------------
 
 def test_sleep_is_bounded_when_nothing_is_scheduled(store):
     executor, _, _ = build(store)
@@ -247,7 +238,6 @@ def test_sleep_is_bounded_even_with_a_distant_pass(store):
     store.replace_desired_state([plan_dict("far", BASE + timedelta(days=3))], "set-1")
     executor, _, _ = build(store)
 
-    # Capped, so a newly synced pass is noticed promptly.
     assert executor.seconds_until_next() == MAX_SLEEP_SECONDS
 
 
@@ -266,7 +256,6 @@ def test_sleep_shrinks_as_a_pass_approaches(store):
     assert 0 < executor.seconds_until_next() <= 10
 
 
-# The whole point: the loop reads only local state.
 def test_the_executor_needs_no_server(store):
     store.replace_desired_state([
         plan_dict("one", BASE + timedelta(minutes=10)),
@@ -275,8 +264,6 @@ def test_the_executor_needs_no_server(store):
     ], "set-1")
     executor, handler, clock = build(store)
 
-    # No client, no network, no Server anywhere in this test. The clock is
-    # stepped to each pass in turn rather than jumping past their windows.
     for offset in (10, 40, 70):
         clock.now = BASE + timedelta(minutes=offset)
         executor.tick()

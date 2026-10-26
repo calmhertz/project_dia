@@ -54,7 +54,6 @@ def new_rotator(writes, **kwargs):
 
 
 def test_command_format_matches_reference():
-    # The reference implementation's proven format: W<az:04d> <el:03d>.
     assert format_command(0, 0) == "W0000 000"
     assert format_command(180, 45) == "W0180 045"
     assert format_command(359, 90) == "W0359 090"
@@ -83,11 +82,9 @@ def test_park_defaults_to_zero_zero():
 
     rotator.park()
 
-    # Matches the reference implementation's park command.
     assert writes == [b"W0000 000\r"]
 
 
-# Global test property 17: no command may leave the valid ranges.
 @pytest.mark.parametrize(
     "azimuth,elevation",
     [(-1, 0), (360, 0), (0, -1), (0, 91), (10_000, 10_000), (-10_000, -10_000)],
@@ -99,7 +96,6 @@ def test_out_of_range_positions_are_refused(azimuth, elevation):
     with pytest.raises(RotatorError):
         rotator.move_to(azimuth, elevation)
 
-    # Nothing reached the hardware.
     assert writes == []
 
 
@@ -107,7 +103,6 @@ def test_tracking_clamps_instead_of_failing():
     writes = []
     rotator = new_rotator(writes)
 
-    # A real pass produces a slightly negative elevation near the horizon.
     assert rotator.track_to(-5, -3) == (0, 0)
     assert rotator.track_to(400, 120) == (MAX_AZIMUTH, MAX_ELEVATION)
     assert writes == [b"W0000 000\r", b"W0359 090\r"]
@@ -130,7 +125,6 @@ def test_fractional_angles_are_truncated_to_whole_degrees():
     assert writes == [b"W0180 045\r"]
 
 
-# An impossible park position is a setup error, caught before the station runs.
 @pytest.mark.parametrize("azimuth,elevation", [(400, 0), (0, 120), (-1, 0)])
 def test_invalid_park_position_is_refused_at_construction(azimuth, elevation):
     with pytest.raises(RotatorError):
@@ -139,8 +133,6 @@ def test_invalid_park_position_is_refused_at_construction(azimuth, elevation):
 
 
 def test_serial_failure_raises_instead_of_being_swallowed():
-    # The reference implementation printed and continued; that would let a
-    # pass proceed believing the antenna moved.
     factory = RecordingSerial([], fail_with=serial.SerialException("port busy"))
     rotator = G550Rotator("/dev/ttyMISSING", 9600, serial_factory=factory)
 
@@ -174,7 +166,6 @@ def test_concurrent_commands_do_not_interleave():
         thread.join()
 
     assert len(writes) == 20
-    # Each write is one complete, well-formed command.
     for payload in writes:
         assert payload.endswith(b"\r")
         assert len(payload) == len(b"W0000 000\r")

@@ -1,8 +1,3 @@
-/// Domain types as the Client sees them.
-///
-/// These mirror the Server's JSON. Fields the Server may omit for
-/// authorization reasons, such as a pass owner, are nullable here rather than
-/// defaulted, so the UI can tell "hidden" from "empty".
 library;
 
 class AuthUser {
@@ -45,8 +40,6 @@ class Satellite {
   final String description;
   final bool isSchedulable;
 
-  /// Enrichment only. Missing metadata must never block scheduling
-  /// (spec.md section 11.2), so the UI treats every entry as optional.
   final Map<String, dynamic> metadata;
 
   String? get status => metadata['status'] as String?;
@@ -82,7 +75,6 @@ class TleSummary {
   );
 }
 
-/// A pass the user could request, from the prediction service.
 class PredictedPass {
   const PredictedPass({
     required this.aos,
@@ -136,7 +128,6 @@ class PassPrediction {
   );
 }
 
-/// A requested or scheduled pass.
 class Pass {
   const Pass({
     required this.id,
@@ -162,8 +153,6 @@ class Pass {
   final double maxElevationDegrees;
   final String recordingMode;
 
-  /// Absent when the Server withheld it, which is how a public pass hides its
-  /// owner from unrelated users (spec.md section 16).
   final String? requestedBy;
   final String? cancellationReason;
 
@@ -207,8 +196,6 @@ class Recording {
   final String downloadUrl;
   final DateTime receivedAt;
 
-  /// Set when the recording came from a listing across passes, so a row can
-  /// say which pass produced it without another request.
   final String? passId;
   final String? satelliteId;
   final DateTime? passAos;
@@ -231,8 +218,6 @@ class Recording {
   );
 }
 
-/// Advisory information attached to a scheduling result, such as a band
-/// mismatch. A warning never means the request failed.
 class SchedulingWarning {
   const SchedulingWarning({required this.code, required this.message});
 
@@ -256,17 +241,10 @@ class ScheduleResult {
   final Pass pass;
   final List<SchedulingWarning> warnings;
 
-  /// Passes a Root override cancelled to make room. Empty for every ordinary
-  /// request (spec.md section 13.7).
   final List<String> overriddenPassIds;
 }
 
-// Operational views for Admin and Root (V14) ---------------------------------
 
-/// Where the station is and what it is operating on.
-///
-/// Deliberately not the full configuration: an Admin reads station operation,
-/// while hardware settings belong to the Root surface.
 class StationStatus {
   const StationStatus({
     required this.name,
@@ -305,9 +283,6 @@ class StationStatus {
   );
 }
 
-/// A station Worker as the Server reports it. Nothing here describes the
-/// transport or the process; it is reachability and backlog only
-/// (client-spec section 4).
 class WorkerStatus {
   const WorkerStatus({
     required this.name,
@@ -343,7 +318,6 @@ class WorkerStatus {
   );
 }
 
-/// The scheduling rules in force. Admin reads them; only Root changes them.
 class SchedulingSettings {
   const SchedulingSettings({
     required this.minimumLeadTime,
@@ -364,9 +338,6 @@ class SchedulingSettings {
   final double minimumElevationDegrees;
   final DateTime effectiveFrom;
 
-  /// A saved change that has not taken effect yet. A new version becomes
-  /// usable only after the newly chosen lead time, so without this a save
-  /// looks like it was lost (spec.md section 13.6).
   final SchedulingSettings? pending;
 
   static Duration _seconds(dynamic value) =>
@@ -385,7 +356,6 @@ class SchedulingSettings {
       );
 }
 
-/// Freshness of one satellite's orbital data.
 class TleStatusEntry {
   const TleStatusEntry({
     required this.satelliteId,
@@ -402,8 +372,6 @@ class TleStatusEntry {
   final int noradId;
   final String name;
 
-  /// False when the satellite has never had orbital data, which is a
-  /// different problem from data that has gone stale.
   final bool hasOrbitalData;
   final bool stale;
   final DateTime? epoch;
@@ -447,7 +415,6 @@ class TleStatus {
   );
 }
 
-/// The outcome of a catalogue-wide TLE refresh.
 class TleRefreshResult {
   const TleRefreshResult({
     required this.updated,
@@ -457,8 +424,6 @@ class TleRefreshResult {
 
   final int updated;
 
-  /// A provider failure leaves the previous data in place rather than
-  /// discarding it (spec.md section 11.1).
   final int keptLastKnownGood;
   final int failed;
 
@@ -470,9 +435,7 @@ class TleRefreshResult {
       );
 }
 
-// Root configuration and audit (V15) -----------------------------------------
 
-/// Radio settings for one band.
 class BandConfig {
   const BandConfig({
     required this.band,
@@ -503,7 +466,6 @@ class BandConfig {
   );
 }
 
-/// Rotator and SDR settings.
 class HardwareConfig {
   const HardwareConfig({
     required this.rotatorSerialPort,
@@ -530,7 +492,6 @@ class HardwareConfig {
   );
 }
 
-/// The complete station configuration, which only Root may read.
 class StationConfig {
   const StationConfig({
     required this.name,
@@ -553,8 +514,6 @@ class StationConfig {
   final List<BandConfig> bands;
   final HardwareConfig hardware;
 
-  /// Passes already committed under the current settings. A change reports
-  /// this rather than rewriting them (client-spec section 29).
   final int upcomingPasses;
 
   factory StationConfig.fromJson(Map<String, dynamic> json) => StationConfig(
@@ -574,8 +533,6 @@ class StationConfig {
   );
 }
 
-/// One entry in the audit trail. What, who, which subject, when. The recorded
-/// before and after state stays server-side.
 class AuditRecord {
   const AuditRecord({
     required this.id,
@@ -606,7 +563,6 @@ class AuditRecord {
   );
 }
 
-/// Whether first-run setup has been completed.
 class SetupStatus {
   const SetupStatus({required this.initialized, this.initializedAt});
 
@@ -621,11 +577,6 @@ class SetupStatus {
   );
 }
 
-/// A SatDump pipeline a pass can be given.
-///
-/// Standard pipelines are whatever the station's SatDump provides; custom
-/// ones are JSON an operator uploaded. The client never invents either
-/// (spec.md section 19.1).
 class SatDumpPipeline {
   const SatDumpPipeline({
     required this.id,
@@ -645,9 +596,6 @@ class SatDumpPipeline {
       );
 }
 
-/// What the station offers. An empty list with [reportedByStation] false
-/// means no ground station has reported an installation yet, which is a
-/// different thing from a station with no pipelines.
 class PipelineCatalogue {
   const PipelineCatalogue({
     required this.pipelines,

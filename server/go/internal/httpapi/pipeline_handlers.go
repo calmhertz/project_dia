@@ -10,19 +10,7 @@ import (
 	"aagasa/internal/store"
 )
 
-// SatDump pipelines (spec.md section 19.1).
-//
-// Two kinds. Standard pipelines are whatever the station's SatDump provides,
-// reported by the Worker when it registers; the Server has no SatDump of its
-// own and does not invent them. Custom pipelines are JSON an operator
-// uploads, validated for structure, stored on disk and carried whole inside
-// the PassPlan so the Worker needs nothing from the Server mid-pass.
-//
-// There is no pipeline editor here, and a pipeline is never inferred from a
-// satellite name.
 
-// maxPipelineBytes bounds an upload. SatDump pipeline definitions are small;
-// anything larger is a mistake or an attempt.
 const maxPipelineBytes = 256 << 10
 
 type pipelineView struct {
@@ -32,7 +20,6 @@ type pipelineView struct {
 	Checksum string `json:"checksum_sha256,omitempty"`
 }
 
-// handleListPipelines returns what a pass may be given.
 func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 	pipelines, err := s.repo.ListPipelines(r.Context())
 	if err != nil {
@@ -49,24 +36,15 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(s.logger, w, http.StatusOK, map[string]any{
 		"pipelines": views,
-		// Nothing to choose from means no Worker has reported an
-		// installation yet, which reads differently from an empty catalogue.
 		"reported_by_station": len(views) > 0,
 	})
 }
 
 type createPipelineRequest struct {
 	Name string `json:"name"`
-	// Definition is the pipeline JSON itself, as text.
 	Definition string `json:"definition"`
 }
 
-// handleCreatePipeline accepts a custom pipeline JSON.
-//
-// Validation is structural only: that it parses, that it is an object, and
-// that it names at least one pipeline. SatDump's own semantics are its
-// business, and pretending to validate them here would be a lie
-// (server-spec section 21).
 func (s *Server) handleCreatePipeline(w http.ResponseWriter, r *http.Request) {
 	var request createPipelineRequest
 	if err := decodeJSON(w, r, &request); err != nil {
@@ -95,8 +73,6 @@ func (s *Server) handleCreatePipeline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.files == nil {
-		// A Server without file storage cannot keep a custom definition, and
-		// crashing on it would be worse than saying so.
 		writeError(s.logger, w, http.StatusServiceUnavailable, "storage_unavailable",
 			"this server cannot store pipeline definitions")
 		return
@@ -105,8 +81,6 @@ func (s *Server) handleCreatePipeline(w http.ResponseWriter, r *http.Request) {
 	sum := sha256.Sum256([]byte(request.Definition))
 	checksum := hex.EncodeToString(sum[:])
 
-	// The row is created first so the file is named by its identity, and a
-	// failed write leaves no unreferenced content behind.
 	actor := currentUser(r)
 	created, err := s.repo.CreatePipeline(r.Context(), store.Pipeline{
 		Name: name, IsCustom: true, ChecksumSHA256: checksum,
@@ -137,11 +111,6 @@ func (s *Server) handleCreatePipeline(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// validatePipelineJSON checks the shape a SatDump pipeline file must have.
-//
-// A SatDump pipeline file is an object keyed by pipeline identifier, each
-// value describing one pipeline. Anything else cannot be run, whatever
-// SatDump would make of the contents.
 func validatePipelineJSON(definition string) (string, bool) {
 	var parsed map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(definition), &parsed); err != nil {

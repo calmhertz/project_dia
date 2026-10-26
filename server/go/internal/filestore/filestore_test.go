@@ -30,7 +30,6 @@ func TestRecordingPathIsUnderRoot(t *testing.T) {
 	}
 }
 
-// A crafted identifier must never reach outside the configured root.
 func TestTraversalIsRejected(t *testing.T) {
 	store := newStore(t)
 

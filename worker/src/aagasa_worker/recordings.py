@@ -15,13 +15,10 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# spec.md section 19.2.
 MINIMUM_RETENTION = timedelta(hours=12)
 DISK_PRESSURE_THRESHOLD = 0.90
 
-# Read size when hashing and uploading. Large enough to be efficient, small
-# enough that a chunk fits comfortably in a gRPC message.
-CHUNK_BYTES = 1 << 20  # 1 MiB
+CHUNK_BYTES = 1 << 20
 
 
 @dataclass(frozen=True)
@@ -77,7 +74,6 @@ def collect(pass_id: str, output_directory: Path) -> list[LocalRecording]:
     for path in sorted(directory.rglob("*")):
         if not path.is_file():
             continue
-        # Skip files still being written by a capture that has not finalised.
         if path.name.startswith("."):
             continue
         relative = path.relative_to(directory).as_posix()
@@ -147,8 +143,6 @@ def select_for_cleanup(candidates: list[CleanupCandidate], now: datetime,
 
     order = by_age(confirmed_expired)
     if under_pressure:
-        # Reach past the retention window only to keep the station working,
-        # and take confirmed copies before anything unconfirmed.
         order = order + by_age(confirmed_recent) + by_age(unconfirmed)
     return order
 

@@ -1,13 +1,3 @@
-// Command aagasa-seed fills a development or test deployment with fixtures.
-//
-// Everything goes through the REST API rather than the database, so seeding
-// exercises the same paths a real operator would and cannot create a state
-// the API would refuse (plan.md V17).
-//
-//	aagasa-seed --server http://127.0.0.1:8080 --root-password '...'
-//
-// It is idempotent: running it twice leaves the same fixtures, because every
-// step treats "already exists" as success.
 package main
 
 import (
@@ -23,12 +13,7 @@ import (
 	"time"
 )
 
-// Fixtures. Deliberately few and obvious: enough to exercise every role and
-// the catalogue, not a synthetic universe.
 var (
-	// Accounts, with passwords that satisfy the Server's policy. These are
-	// development fixtures and are printed, so they must never be used
-	// anywhere real.
 	seedUsers = []struct {
 		Username string
 		Password string
@@ -38,20 +23,13 @@ var (
 		{"approver", "approver-development-password", "admin"},
 	}
 
-	// Satellites chosen for being reliably present at both TLE providers and
-	// for having pipelines in a standard SatDump installation.
 	seedSatellites = []int{25544, 33591, 40069}
 )
 
 const bootstrapPassword = "toor"
 
-// exitAlreadyConfigured is returned when the deployment has been set up with
-// credentials this tool was not given. Callers use it to tell "cannot seed"
-// apart from "nothing to seed", because an environment someone is already
-// using should still start.
 const exitAlreadyConfigured = 3
 
-// errAlreadyConfigured marks that case.
 var errAlreadyConfigured = errors.New("already configured with its own credentials")
 
 type client struct {
@@ -115,7 +93,6 @@ func fail(err error) {
 	os.Exit(1)
 }
 
-// waitForServer gives a freshly started stack time to come up.
 func (c *client) waitForServer(limit time.Duration) error {
 	deadline := time.Now().Add(limit)
 	for time.Now().Before(deadline) {
@@ -135,7 +112,6 @@ func (c *client) waitForServer(limit time.Duration) error {
 	return errors.New("the server did not become ready")
 }
 
-// signInAsRoot signs in, changing the bootstrap password on first run.
 func (c *client) signInAsRoot(password string) error {
 	token, mustChange, err := c.login("root", password)
 	if err == nil {
@@ -146,8 +122,6 @@ func (c *client) signInAsRoot(password string) error {
 		return nil
 	}
 
-	// Not the configured password: this must be a fresh deployment still on
-	// the bootstrap credential.
 	token, mustChange, bootstrapErr := c.login("root", bootstrapPassword)
 	if bootstrapErr != nil {
 		return fmt.Errorf("%w: root's password is neither the bootstrap one nor the one "+
@@ -185,7 +159,6 @@ func (c *client) changePassword(current, next string) error {
 		map[string]any{"current_password": current, "new_password": next}, nil); err != nil {
 		return fmt.Errorf("change the root password: %w", err)
 	}
-	// The Server revokes the session on a password change.
 	token, _, err := c.login("root", next)
 	if err != nil {
 		return err
@@ -221,8 +194,6 @@ func (c *client) ensureSetup(request setupRequest) error {
 		"altitude_m": request.AltitudeM, "timezone": "UTC",
 		"active_rf_band": "vhf",
 		"bands": []map[string]any{
-			// Real downlinks, so a pass plan carries values a simulated or a
-			// real receiver would both accept.
 			{"band": "vhf", "antenna_description": "Turnstile",
 				"center_frequency_hz": 137100000, "sample_rate_hz": 2048000, "gain_db": 40.0},
 			{"band": "uhf", "antenna_description": "Yagi",
@@ -252,13 +223,6 @@ func (c *client) ensureSetup(request setupRequest) error {
 	return nil
 }
 
-// ensureUsers creates the fixture accounts and walks each one through the
-// forced first password change.
-//
-// The Server creates every account needing a change before it can be used,
-// which is right, and would leave the fixtures unusable. Seeding completes
-// that step the way a person would, so the accounts are ready and the rule
-// itself is exercised on every seed.
 func (c *client) ensureUsers() error {
 	rootToken := c.token
 	defer func() { c.token = rootToken }()
@@ -274,7 +238,6 @@ func (c *client) ensureUsers() error {
 		case err == nil:
 			fmt.Printf("user: created %s\n", user.Username)
 		case isConflict(err):
-			// Already seeded, and already past its first sign-in.
 			fmt.Printf("user: %s already exists\n", user.Username)
 			continue
 		default:
@@ -308,15 +271,12 @@ func (c *client) ensureSatellites() error {
 		case isConflict(err):
 			fmt.Printf("satellite: %d already in the catalogue\n", noradID)
 		default:
-			// A provider outage must not fail the whole seed: the rest of the
-			// environment is still usable.
 			fmt.Printf("satellite: %d could not be added (%v)\n", noradID, err)
 		}
 	}
 	return nil
 }
 
-// apiError carries the Server's own words, which are written to be read.
 type apiError struct {
 	StatusCode int
 	Code       string

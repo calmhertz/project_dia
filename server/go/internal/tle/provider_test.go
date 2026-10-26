@@ -15,7 +15,6 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewJSONHandler(io.Discard, nil))
 }
 
-// CelesTrak, replayed from a captured live response.
 func TestCelestrakFetch(t *testing.T) {
 	var gotQuery string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -31,13 +30,11 @@ func TestCelestrakFetch(t *testing.T) {
 	if set.NoradID != 25544 {
 		t.Errorf("NoradID = %d, want 25544", set.NoradID)
 	}
-	// The verified query shape.
 	if gotQuery != "CATNR=25544&FORMAT=TLE" {
 		t.Errorf("query = %q, want CATNR=25544&FORMAT=TLE", gotQuery)
 	}
 }
 
-// The live endpoint answers 404 with "No GP data found" for an unknown object.
 func TestCelestrakUnknownSatelliteIsNotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -51,7 +48,6 @@ func TestCelestrakUnknownSatelliteIsNotFound(t *testing.T) {
 	}
 }
 
-// It has also been seen answering 200 with the same body.
 func TestCelestrakNoDataBodyWithStatus200(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "No GP data found")
@@ -74,13 +70,11 @@ func TestCelestrakServerErrorIsNotMistakenForMissingData(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	// An outage must stay distinct from "this satellite does not exist".
 	if errors.Is(err, ErrNotFound) {
 		t.Error("a 500 was reported as ErrNotFound")
 	}
 }
 
-// A provider returning the wrong object must never be stored under our id.
 func TestCelestrakRejectsMismatchedCatalogNumber(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, celestrakNOAA19)
@@ -93,7 +87,6 @@ func TestCelestrakRejectsMismatchedCatalogNumber(t *testing.T) {
 	}
 }
 
-// SatNOGS, replayed from a captured live response.
 func TestSatNOGSFetch(t *testing.T) {
 	const body = `[{"tle0":"0 ISS (ZARYA)",
 	  "tle1":"1 25544U 98067A   26236.17729445  .00008773  00000-0  16369-3 0  9991",
@@ -114,7 +107,6 @@ func TestSatNOGSFetch(t *testing.T) {
 	}
 }
 
-// The live endpoint returns an empty array with HTTP 200 for an unknown object.
 func TestSatNOGSEmptyArrayIsNotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "[]")
@@ -149,13 +141,11 @@ func TestSatNOGSMetadata(t *testing.T) {
 	if asMap["source"] != "satnogs" || asMap["countries"] != "RU,US" {
 		t.Errorf("AsMap = %v", asMap)
 	}
-	// Empty fields are omitted so absence stays visible.
 	if _, present := asMap["image"]; present {
 		t.Error("an empty field was stored")
 	}
 }
 
-// Fallback chain -----------------------------------------------------------
 
 type stubProvider struct {
 	name  Source
@@ -201,7 +191,6 @@ func TestChainUsesThePreferredProviderFirst(t *testing.T) {
 	}
 }
 
-// spec.md section 11.3: primary failure falls through to the fallback.
 func TestChainFallsBackWhenThePrimaryFails(t *testing.T) {
 	chain := NewChain(discardLogger(),
 		stubProvider{name: SourceCelestrak, err: errors.New("connection refused")},
@@ -231,7 +220,6 @@ func TestChainReportsFailureWhenEveryProviderFails(t *testing.T) {
 	}
 }
 
-// A cancelled request must stop, not retry the same failure per provider.
 func TestChainStopsOnCancellation(t *testing.T) {
 	calls := 0
 	chain := NewChain(discardLogger(),

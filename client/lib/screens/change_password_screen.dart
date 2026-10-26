@@ -3,10 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../state/session.dart';
 
-/// Forced password change.
-///
-/// The Server refuses everything else until this is done, so the screen has no
-/// way out other than completing it or signing out (spec.md section 17.1).
 class ChangePasswordScreen extends StatefulWidget {
   const ChangePasswordScreen({super.key});
 
@@ -112,8 +108,6 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                       border: OutlineInputBorder(),
                     ),
                     validator: (value) {
-                      // Mirrors the Server's policy so the user is not made to
-                      // round-trip for an obvious problem.
                       if (value == null || value.length < 12) {
                         return 'Use at least 12 characters';
                       }

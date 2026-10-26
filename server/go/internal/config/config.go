@@ -1,4 +1,3 @@
-// Package config loads Server configuration from the environment.
 package config
 
 import (
@@ -9,8 +8,6 @@ import (
 	"time"
 )
 
-// Config holds all Server runtime configuration. Secrets are read from the
-// environment and never logged.
 type Config struct {
 	Environment string
 	LogLevel    string
@@ -25,32 +22,19 @@ type Config struct {
 
 	PredictionAddress string
 
-	// Large binary content lives on disk; metadata stays in the database.
 	RecordingsDir string
 	PipelinesDir  string
 
-	// WebDir is the built Flutter client served at the root of the HTTP
-	// listener. Empty disables static serving, which is what the API tests
-	// and an API-only deployment want.
 	WebDir string
 
-	// TLE providers. Empty values use the verified default endpoints.
 	CelestrakURL string
 	SatNOGSURL   string
-	// TLERefreshEnabled turns the background refresh loop off, which is
-	// useful in tests and in an air-gapped deployment.
 	TLERefreshEnabled bool
 
-	// Shared secret the Worker presents on gRPC calls. See spec.md section 18.
 	WorkerSharedSecret string
 
-	// Browser origins allowed to call the REST API. The web client runs on
-	// its own origin, so without this the browser blocks every request.
 	AllowedOrigins []string
 
-	// TLS material for both listeners. The Worker sends a shared secret on
-	// every gRPC call, so an untrusted network between the two must be
-	// encrypted (spec.md section 21).
 	TLSCertFile string
 	TLSKeyFile  string
 
@@ -58,7 +42,6 @@ type Config struct {
 	SessionTTL     time.Duration
 }
 
-// Load reads configuration from the environment and validates it.
 func Load() (Config, error) {
 	cfg := Config{
 		Environment:        env("AAGASA_ENV", "development"),
@@ -115,13 +98,10 @@ func (c Config) validate() error {
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required environment variables: %s", strings.Join(sorted(missing), ", "))
 	}
-	// A guessable Worker secret would let anyone impersonate the station.
 	if len(c.WorkerSharedSecret) < 32 {
 		return fmt.Errorf("AAGASA_WORKER_SHARED_SECRET must be at least 32 characters")
 	}
 
-	// Half a TLS configuration is a misconfiguration, not a hint to serve
-	// plaintext: say so rather than quietly starting without encryption.
 	certGiven := strings.TrimSpace(c.TLSCertFile) != ""
 	keyGiven := strings.TrimSpace(c.TLSKeyFile) != ""
 	if certGiven != keyGiven {
@@ -140,19 +120,14 @@ func (c Config) validate() error {
 	return nil
 }
 
-// TLSEnabled reports whether the listeners will be encrypted.
 func (c Config) TLSEnabled() bool {
 	return strings.TrimSpace(c.TLSCertFile) != "" && strings.TrimSpace(c.TLSKeyFile) != ""
 }
 
-// AllowLocalhostOrigins permits any localhost port to call the API, which is
-// what the Flutter dev server needs. Development only: a production
-// deployment names its origins explicitly.
 func (c Config) AllowLocalhostOrigins() bool {
 	return c.Environment == "development"
 }
 
-// envList reads a comma-separated list, ignoring blanks.
 func envList(name string) []string {
 	var values []string
 	for _, part := range strings.Split(os.Getenv(name), ",") {

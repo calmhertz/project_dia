@@ -20,9 +20,7 @@ from aagasa_worker.recordings import (
 BASE = datetime(2026, 8, 25, 12, 0, 0, tzinfo=timezone.utc)
 
 
-# Identity -----------------------------------------------------------------
 
-# The whole idempotency story rests on this being stable.
 def test_recording_id_is_deterministic():
     first = recording_id_for("pass-1", "baseband.ziq")
     second = recording_id_for("pass-1", "baseband.ziq")
@@ -37,8 +35,6 @@ def test_recording_id_distinguishes_passes_and_paths():
     assert recording_id_for("pass-1", "a.bin") != recording_id_for("pass-1", "b.bin")
 
 
-# A partially written file must not become a different recording, or a retry
-# after a truncated capture would upload as a second one.
 def test_recording_id_does_not_depend_on_content(tmp_path):
     first = recording_id_for("pass-1", "out.bin")
     (tmp_path / "out.bin").write_bytes(b"different content entirely")
@@ -94,7 +90,6 @@ def test_read_chunks_reassembles_the_file(tmp_path):
     assert b"".join(read_chunks(path, chunk_bytes=1024)) == payload
 
 
-# Retention ----------------------------------------------------------------
 
 def candidate(name, hours_old, uploaded):
     return CleanupCandidate(
@@ -102,7 +97,6 @@ def candidate(name, hours_old, uploaded):
         finished_at=BASE - timedelta(hours=hours_old), uploaded=uploaded)
 
 
-# spec.md section 19.2: keep local copies at least twelve hours.
 def test_nothing_is_deleted_before_the_retention_window():
     candidates = [candidate("recent", 2, uploaded=True)]
 
@@ -122,15 +116,12 @@ def test_confirmed_and_expired_recordings_go_oldest_first():
     assert order == ["oldest", "middle", "newer"]
 
 
-# An unconfirmed recording would be lost for good, so it is never touched
-# under normal conditions (worker-spec section 15).
 def test_unconfirmed_recordings_are_never_deleted_normally():
     candidates = [candidate("never-uploaded", 100, uploaded=False)]
 
     assert select_for_cleanup(candidates, BASE, under_pressure=False) == []
 
 
-# spec.md section 19.2: above ninety percent, older data may go early.
 def test_disk_pressure_reaches_past_the_retention_window():
     candidates = [
         candidate("expired", 20, uploaded=True),
@@ -143,7 +134,6 @@ def test_disk_pressure_reaches_past_the_retention_window():
     assert order == ["expired", "recent"]
 
 
-# Even under pressure, a confirmed copy goes before an unconfirmed one.
 def test_disk_pressure_prefers_confirmed_copies(): 
     candidates = [
         candidate("unconfirmed-old", 50, uploaded=False),
@@ -160,7 +150,6 @@ def test_retention_window_matches_the_specification():
     assert MINIMUM_RETENTION == timedelta(hours=12)
 
 
-# Deletion is destructive, so the path check is explicit.
 def test_paths_outside_the_root_are_rejected(tmp_path):
     root = tmp_path / "recordings"
     root.mkdir()
@@ -173,7 +162,6 @@ def test_paths_outside_the_root_are_rejected(tmp_path):
     assert ensure_within(root, Path("/etc/passwd")) is False
 
 
-# Local queue --------------------------------------------------------------
 
 @pytest.fixture
 def store(tmp_path):
@@ -199,7 +187,6 @@ def test_registering_output_queues_it_for_upload(store, tmp_path):
     assert len(store.pending_uploads()) == 2
 
 
-# A re-scan after a restart must not queue the same file twice.
 def test_registering_the_same_output_twice_is_a_no_op(store, tmp_path):
     output = make_output(tmp_path, "pass-1", {"a.bin": b"x" * 10})
 
@@ -219,7 +206,6 @@ def test_an_acknowledged_recording_leaves_the_queue(store, tmp_path):
     assert store.get_recording(recording.recording_id).uploaded is True
 
 
-# A failed upload must never cost the recording.
 def test_a_failed_upload_keeps_the_recording_queued(store, tmp_path):
     output = make_output(tmp_path, "pass-1", {"a.bin": b"x" * 10})
     store.record_recordings(collect("pass-1", output))
@@ -232,11 +218,9 @@ def test_a_failed_upload_keeps_the_recording_queued(store, tmp_path):
     assert len(still_pending) == 1
     assert still_pending[0].attempts == 2
     assert still_pending[0].last_error == "UNAVAILABLE"
-    # And the file is still on disk.
     assert (output / "a.bin").exists()
 
 
-# Worker restarted with an upload pending: the queue must survive.
 def test_the_upload_queue_survives_a_restart(tmp_path):
     output = make_output(tmp_path, "pass-1", {"a.bin": b"x" * 10})
 

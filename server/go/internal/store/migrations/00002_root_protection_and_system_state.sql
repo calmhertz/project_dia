@@ -1,8 +1,6 @@
 -- +goose Up
 -- +goose StatementBegin
 
--- spec.md section 17.1: Root cannot be deleted and cannot be demoted. This is
--- enforced in the database so no API path, CLI or manual query can bypass it.
 CREATE FUNCTION protect_root_user() RETURNS trigger AS $$
 BEGIN
     IF TG_OP = 'DELETE' THEN
@@ -29,7 +27,6 @@ CREATE TRIGGER users_protect_root
 -- +goose StatementEnd
 
 -- +goose StatementBegin
--- Single-row marker for first-run completion (spec.md section 23).
 CREATE TABLE system_state (
     id             boolean PRIMARY KEY DEFAULT true,
     initialized_at timestamptz,

@@ -1,33 +1,4 @@
 #!/usr/bin/env bash
-# Aagasa powertool: podman pods + env files, plus development entrypoints.
-#
-#   ./deploy.sh help          # full command list
-#   ./deploy.sh build         # build server, prediction and worker images
-#   ./deploy.sh web-build     # build the Flutter client into deploy/server/web
-#   ./deploy.sh up            # databases + server (UI on :8080) + worker
-#   ./deploy.sh server-up     # databases + server only
-#   ./deploy.sh worker-up     # worker only
-#   ./deploy.sh down          # remove everything
-#   ./deploy.sh status        # show pods and containers
-#   ./deploy.sh logs [server|pred|worker|db|all]  # follow logs
-#
-# UI and API: http://127.0.0.1:8080
-# gRPC:       127.0.0.1:9090
-#
-# The Go Server serves the built Flutter client from deploy/server/web, at the
-# root of the same origin as /api. There is no separate web container, so the
-# browser never makes a cross-origin request.
-#
-# Configuration (edit these, no other files needed):
-#   deploy/server/.env.server    -> server env (DB URLs, secrets, ports)
-#   deploy/worker/.env.worker    -> worker env (server address, hardware)
-#   deploy/server/databases.yaml -> DB passwords/images
-#
-# Server and Worker run in separate pods on the "aagasa-net" Podman network,
-# so they can talk to each other by pod name.
-#
-# The former Makefile's development targets (proto, test, migrate, fmt, lint,
-# clean, deps, dev environment) also live here.
 
 set -uo pipefail
 
@@ -112,7 +83,6 @@ wait_for_readyz() {
 deploy_databases() {
     say "Databases"
     remove_pod "$DB_POD"
-    # Rewrite data paths for rootless mode ($HOME/.local/share/aagasa).
     local rendered
     rendered="$(mktemp /tmp/aagasa-databases.XXXXXX.yaml)"
     sed "s|/var/lib/aagasa|$STATE|g" "$SERVER_DIR/databases.yaml" > "$rendered"
@@ -139,13 +109,10 @@ deploy_server() {
     podman pod create --name "$SERVER_POD" --network "$NETWORK" \
         -p 8080:8080 -p 9090:9090 >/dev/null
 
-    # Prediction service shares the pod network: the server calls 127.0.0.1:9091.
     podman run -d --pod "$SERVER_POD" --name aagasa-prediction \
         --env-file "$SERVER_ENV" \
         localhost/aagasa-prediction:latest >/dev/null
 
-    # The built client is also baked into the image. Mounting the working tree
-    # copy makes `./deploy.sh web-build` take effect without rebuilding Go.
     local webmount=()
     if [[ -f "$SERVER_WEB/index.html" ]]; then
         webmount=(-v "$SERVER_WEB:/app/web:ro,Z")
@@ -168,10 +135,6 @@ deploy_worker() {
     say "Worker pod"
     remove_pod "$WORKER_POD"
 
-    # keep-id maps the unprivileged host user to the Worker's uid 10003, so
-    # host ACLs on /dev/bus/usb/... (e.g. user:unag:rw-) still apply inside
-    # the container. This must be set on the pod: Podman rejects per-container
-    # user namespaces when joining a pod with an infra container.
     podman pod create --name "$WORKER_POD" --network "$NETWORK" \
         --userns=keep-id:uid=10003,gid=10003 >/dev/null
 
@@ -203,8 +166,6 @@ build_web() {
         || die "flutter web build failed"
     [[ -f "$CLIENT_WEB/index.html" ]] || die "flutter build produced no index.html"
 
-    # deploy/server/web is what the Server serves and what its image copies.
-    # Replace it wholesale so removed assets do not linger between builds.
     say "Publishing client to deploy/server/web"
     mkdir -p "$SERVER_WEB"
     find "$SERVER_WEB" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
@@ -273,14 +234,7 @@ CONTAINERFILE
 
 prepare_dirs() {
     mkdir -p "$RECORDINGS" "$PIPELINES" "$WORKER_STATE"
-    # The Worker pod maps the host user to container uid 10003 (keep-id).
-    # Files left by an older deployment are owned by a subuid, so the Worker
-    # can neither write nor chmod them. Reclaim the state directory through
-    # the user namespace first; recordings only need directory write access.
     podman unshare chown -R 0:0 "$WORKER_STATE" 2>/dev/null || true
-    # Rootless Podman maps some container uids to subuids on the host, so
-    # world-writable data dirs are the simple way to let both containers
-    # write. Suitable for a single-host deployment.
     chmod -R a+rwX "$RECORDINGS" "$PIPELINES" "$WORKER_STATE" 2>/dev/null || true
 }
 
@@ -375,7 +329,6 @@ cmd_logs() {
     esac
 }
 
-# Development entrypoints (former Makefile targets) --------------------------
 
 cmd_deps() {
     require_podman
@@ -426,15 +379,11 @@ cmd_test() {
     note "all suites passed"
 }
 
-# Requires AAGASA_TEST_POSTGRES_URL, AAGASA_TEST_REDIS_URL and
-# AAGASA_TEST_MONGO_URL. Without them the store tests skip.
 cmd_test_integration() {
     (cd "$ROOT/server/go" && go test ./internal/store/... -count=1)
 }
 
 cmd_migrate() {
-    # The Go migrator reads AAGASA_POSTGRES_URL/AAGASA_MONGO_URL; source the
-    # Server env so the command works standalone against the running databases.
     if [[ -f "$SERVER_ENV" ]]; then
         set -a
         . "$SERVER_ENV"
@@ -466,8 +415,6 @@ cmd_lint() {
     fi
 }
 
-# Removes generated code and build output; regenerated by proto and
-# web-build. Never removes tracked files.
 cmd_clean() {
     cd "$ROOT" || die "cannot enter $ROOT"
     rm -rf server/go/internal/gen server/python/src/aagasa worker/src/aagasa
@@ -475,8 +422,6 @@ cmd_clean() {
     note "generated code and build output removed"
 }
 
-# The host-run development environment (no Podman), with simulated hardware
-# unless AAGASA_HARDWARE=real.
 cmd_dev() {
     local action="${1:-up}"
     "$ROOT/scripts/dev-env.sh" "$action"
