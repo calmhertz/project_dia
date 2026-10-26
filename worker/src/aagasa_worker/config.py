@@ -34,6 +34,7 @@ class Config:
 
     satdump_binary: str
     satdump_pipelines_dir: str
+    satdump_legacy_cli: bool
 
     log_level: str
     heartbeat_interval_seconds: int
@@ -62,6 +63,7 @@ def load_config() -> Config:
         rtl_test_binary=_env("AAGASA_RTL_TEST_BIN", "rtl_test"),
         satdump_binary=_env("AAGASA_SATDUMP_BIN", "satdump"),
         satdump_pipelines_dir=_env("AAGASA_SATDUMP_PIPELINES_DIR", ""),
+        satdump_legacy_cli=_env_bool("AAGASA_SATDUMP_LEGACY_CLI", False),
         log_level=_env("AAGASA_LOG_LEVEL", "info").upper(),
         heartbeat_interval_seconds=_env_int("AAGASA_HEARTBEAT_INTERVAL_SECONDS", 5),
     )

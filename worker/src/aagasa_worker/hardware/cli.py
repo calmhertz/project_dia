@@ -36,7 +36,8 @@ def build_station(config: Config) -> Station:
             rtl_test_binary=config.rtl_test_binary,
             device_index=config.sdr_device_index,
         ),
-        satdump=SatDump(binary=config.satdump_binary, pipeline_dirs=pipeline_dirs),
+        satdump=SatDump(binary=config.satdump_binary, pipeline_dirs=pipeline_dirs,
+                        legacy_cli=config.satdump_legacy_cli),
     )
 
 

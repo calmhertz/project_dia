@@ -29,6 +29,11 @@ type Config struct {
 	RecordingsDir string
 	PipelinesDir  string
 
+	// WebDir is the built Flutter client served at the root of the HTTP
+	// listener. Empty disables static serving, which is what the API tests
+	// and an API-only deployment want.
+	WebDir string
+
 	// TLE providers. Empty values use the verified default endpoints.
 	CelestrakURL string
 	SatNOGSURL   string
@@ -70,6 +75,7 @@ func Load() (Config, error) {
 		TLERefreshEnabled:  envBool("AAGASA_TLE_REFRESH_ENABLED", true),
 		RecordingsDir:      env("AAGASA_RECORDINGS_DIR", "/var/lib/aagasa/recordings"),
 		PipelinesDir:       env("AAGASA_PIPELINES_DIR", "/var/lib/aagasa/pipelines"),
+		WebDir:             env("AAGASA_WEB_DIR", "/app/web"),
 		WorkerSharedSecret: os.Getenv("AAGASA_WORKER_SHARED_SECRET"),
 		AllowedOrigins:     envList("AAGASA_ALLOWED_ORIGINS"),
 		TLSCertFile:        os.Getenv("AAGASA_TLS_CERT_FILE"),

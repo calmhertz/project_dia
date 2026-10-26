@@ -37,7 +37,9 @@ class RTLSDRProbe:
             completed = subprocess.run(
                 [self._binary, "-t"],
                 capture_output=True,
-                text=True,
+                # rtl_test writes terminal control bytes that are not valid
+                # UTF-8; decoding must never take the Worker down.
+                encoding="utf-8", errors="replace",
                 timeout=PROBE_TIMEOUT_SECONDS,
                 check=False,
             )
@@ -47,7 +49,13 @@ class RTLSDRProbe:
             raise SDRError(f"{self._binary} did not respond") from error
 
         output = f"{completed.stdout}\n{completed.stderr}"
-        if _NO_DEVICES in output.lower():
+        lowered = output.lower()
+        if _NO_DEVICES in lowered:
+            return []
+        # libusb can enumerate the host device through sysfs even when the
+        # container has no permission to open it. Treat that as absent so the
+        # Worker never claims a radio it cannot actually use.
+        if "usb_open error" in lowered or "failed to open rtlsdr device" in lowered:
             return []
 
         devices = []

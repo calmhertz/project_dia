@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_PIPELINE_DIRS = (
     Path.home() / ".local/share/satdump/pipelines",
     Path("/usr/share/satdump/pipelines"),
+    # SatDump 2.x packages keep the bundled pipelines under resources.
+    Path("/usr/share/satdump/resources/pipelines"),
     Path("/usr/local/share/satdump/pipelines"),
 )
 
@@ -159,9 +161,12 @@ def discover_pipelines(pipeline_dirs=None) -> list[Pipeline]:
 class SatDump:
     """Runs SatDump and reports deterministic results."""
 
-    def __init__(self, binary: str = "satdump", pipeline_dirs=None):
+    def __init__(self, binary: str = "satdump", pipeline_dirs=None,
+                 legacy_cli: bool = False):
         self._binary = binary
         self._pipeline_dirs = pipeline_dirs
+        # SatDump 2.x moved the old live/record commands under `legacy`.
+        self._legacy_cli = legacy_cli
 
     def check(self) -> str:
         """Confirm SatDump is installed and return its resolved path."""
@@ -183,8 +188,11 @@ class SatDump:
 
         Mirrors the invocation shape proven by the reference implementation.
         """
-        command = [
-            self._binary, "live", pipeline, output_dir,
+        command = [self._binary]
+        if self._legacy_cli:
+            command.append("legacy")
+        command += [
+            "live", pipeline, output_dir,
             "--source", str(sdr_settings.get("source", "rtlsdr")),
             "--frequency", str(int(frequency_hz)),
             "--samplerate", str(int(sdr_settings["samplerate"])),
@@ -199,8 +207,11 @@ class SatDump:
     def build_record_command(self, output_path: str, frequency_hz: int,
                              sdr_settings: dict) -> list[str]:
         """Build a baseband recording command line."""
-        command = [
-            self._binary, "record", output_path,
+        command = [self._binary]
+        if self._legacy_cli:
+            command.append("legacy")
+        command += [
+            "record", output_path,
             "--source", str(sdr_settings.get("source", "rtlsdr")),
             "--frequency", str(int(frequency_hz)),
             "--samplerate", str(int(sdr_settings["samplerate"])),
@@ -217,7 +228,8 @@ class SatDump:
         """Run SatDump to completion and capture its outcome."""
         try:
             completed = subprocess.run(
-                command, capture_output=True, text=True,
+                command, capture_output=True,
+                encoding="utf-8", errors="replace",
                 timeout=timeout_seconds, check=False,
             )
         except FileNotFoundError as error:
@@ -244,7 +256,7 @@ class SatDump:
             # does not kill a capture before it can be finalised cleanly.
             return subprocess.Popen(
                 command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, start_new_session=True,
+                encoding="utf-8", errors="replace", start_new_session=True,
             )
         except FileNotFoundError as error:
             raise SatDumpError(f"satdump binary {self._binary!r} not found") from error

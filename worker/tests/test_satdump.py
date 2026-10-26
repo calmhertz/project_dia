@@ -128,6 +128,16 @@ def test_record_command_requests_baseband():
     assert command[command.index("--baseband_format") + 1] == "ziq"
 
 
+def test_legacy_cli_prefixes_v2_commands():
+    satdump = SatDump(binary="satdump", legacy_cli=True)
+
+    live = satdump.build_live_command("noaa_apt", "/out", 100, SDR_SETTINGS)
+    record = satdump.build_record_command("/out", 100, SDR_SETTINGS)
+
+    assert live[:5] == ["satdump", "legacy", "live", "noaa_apt", "/out"]
+    assert record[:4] == ["satdump", "legacy", "record", "/out"]
+
+
 def test_optional_settings_are_only_added_when_set():
     satdump = SatDump(binary="satdump")
 

@@ -31,6 +31,8 @@ type Dependencies struct {
 	Catalog    *catalog.Service
 	Scheduling *scheduling.Service
 	Prediction *prediction.Client
+	// WebDir holds the built Flutter client. Empty serves the API only.
+	WebDir string
 }
 
 // Server holds the HTTP handlers and their dependencies.
@@ -127,6 +129,10 @@ func NewMux(logger *slog.Logger, version string, deps Dependencies) http.Handler
 	// First-run setup -------------------------------------------------------
 	mux.HandleFunc("GET /api/setup", s.authenticated(s.handleSetupStatus))
 	mux.HandleFunc("POST /api/setup", s.authenticated(s.handleSetup))
+
+	// Flutter web client ----------------------------------------------------
+	// Registered last: every API route above is more specific and wins.
+	registerStatic(mux, s.logger, deps.WebDir)
 
 	return mux
 }

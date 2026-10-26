@@ -330,7 +330,7 @@ void main() {
       find.widgetWithText(TextField, 'Name'),
       'Renamed Station',
     );
-    await tester.tap(find.text('Save').first);
+    await tester.tap(find.widgetWithText(FilledButton, 'Save station'));
     await tester.pumpAndSettle();
 
     expect(
@@ -353,7 +353,7 @@ void main() {
       find.widgetWithText(TextField, 'Park azimuth (0-359)'),
       '400',
     );
-    await tester.tap(find.widgetWithText(FilledButton, 'Save').at(3));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save hardware'));
     await tester.pumpAndSettle();
 
     expect(
@@ -385,7 +385,7 @@ void main() {
       find.widgetWithText(TextField, 'Minimum lead time (seconds)'),
       '600',
     );
-    await tester.tap(find.widgetWithText(FilledButton, 'Save').last);
+    await tester.tap(find.widgetWithText(FilledButton, 'Save scheduling'));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('In force from'), findsOneWidget);
@@ -648,7 +648,7 @@ void frequencyTests() {
       find.widgetWithText(TextField, 'Centre frequency (Hz)').first,
       '137620000',
     );
-    await tester.tap(find.widgetWithText(FilledButton, 'Save').at(1));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save VHF'));
     await tester.pumpAndSettle();
 
     expect(

@@ -121,6 +121,7 @@ func run() error {
 		Catalog:    catalogService,
 		Scheduling: schedulingService,
 		Prediction: predictionClient,
+		WebDir:     cfg.WebDir,
 	})
 	corsOptions := httpapi.CORSOptions{
 		AllowedOrigins: cfg.AllowedOrigins,

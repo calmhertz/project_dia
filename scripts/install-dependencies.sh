@@ -130,8 +130,8 @@ else
 fi
 
 say "Protocol buffers"
-# `make proto` regenerates the Go and Python stubs; the compiler comes from the
-# distribution, the language plugins from Go.
+# The deploy script's proto command regenerates the Go and Python stubs; the
+# compiler comes from the distribution, the language plugins from Go.
 if [ "$PACKAGE_MANAGER" = apt ]; then
     install_packages protobuf-compiler
 else
@@ -268,7 +268,7 @@ elif have go; then
     go install google.golang.org/protobuf/cmd/protoc-gen-go@latest >/dev/null 2>&1 \
         && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest >/dev/null 2>&1 \
         && did "protoc-gen-go and protoc-gen-go-grpc in $HOME/go/bin" \
-        || note "could not install the protobuf plugins; run 'make proto' to see why"
+        || note "could not install the protobuf plugins; run './deploy.sh proto' to see why"
 else
     gap "protoc-gen-go (needs Go on PATH)"
 fi
@@ -330,7 +330,7 @@ cat <<NEXT
 
 Next:
   source ${profile:-~/.bashrc}
-  make test                      # every component, no databases needed
+  ./deploy.sh test               # every component, no databases needed
   scripts/dev-env.sh up          # a complete environment, simulated hardware
 
 If you are on the station host, plug in the rotator and the dongle and check

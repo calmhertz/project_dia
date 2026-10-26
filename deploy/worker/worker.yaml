@@ -2,6 +2,7 @@
 #
 # Device access is explicit: the rotator serial port and the RTL-SDR USB bus
 # must both be mapped, and the pod needs privileges to reach them.
+# This file supports environment variable substitution via envsubst.
 apiVersion: v1
 kind: Pod
 metadata:
@@ -14,32 +15,38 @@ spec:
       image: localhost/aagasa-worker:latest
       env:
         - name: AAGASA_LOG_LEVEL
-          value: "info"
+          value: "${AAGASA_LOG_LEVEL}"
         # The Server resolves the identifiers from this name.
         - name: AAGASA_WORKER_NAME
-          value: "worker-1"
+          value: "${AAGASA_WORKER_NAME}"
         - name: AAGASA_SERVER_GRPC_ADDRESS
-          value: "server.example.internal:9090"
+          value: "${AAGASA_SERVER_GRPC_ADDRESS}"
         - name: AAGASA_SERVER_TLS_ENABLED
-          value: "true"
+          value: "${AAGASA_SERVER_TLS_ENABLED}"
         - name: AAGASA_STATE_DIR
-          value: "/var/lib/aagasa/state"
+          value: "${AAGASA_STATE_DIR}"
         - name: AAGASA_RECORDINGS_DIR
-          value: "/var/lib/aagasa/recordings"
+          value: "${AAGASA_RECORDINGS_DIR}"
         - name: AAGASA_ROTATOR_SERIAL_PORT
-          value: "/dev/ttyUSB0"
+          value: "${AAGASA_ROTATOR_SERIAL_PORT}"
         - name: AAGASA_ROTATOR_BAUD_RATE
-          value: "9600"
+          value: "${AAGASA_ROTATOR_BAUD_RATE}"
         - name: AAGASA_ROTATOR_PARK_AZIMUTH
-          value: "0"
+          value: "${AAGASA_ROTATOR_PARK_AZIMUTH}"
         - name: AAGASA_ROTATOR_PARK_ELEVATION
-          value: "0"
+          value: "${AAGASA_ROTATOR_PARK_ELEVATION}"
         - name: AAGASA_SDR_DEVICE_INDEX
-          value: "0"
+          value: "${AAGASA_SDR_DEVICE_INDEX}"
+        - name: AAGASA_RTL_TEST_BIN
+          value: "${AAGASA_RTL_TEST_BIN}"
         - name: AAGASA_SATDUMP_BIN
-          value: "satdump"
+          value: "${AAGASA_SATDUMP_BIN}"
+        - name: AAGASA_SATDUMP_PIPELINES_DIR
+          value: "${AAGASA_SATDUMP_PIPELINES_DIR}"
+        - name: AAGASA_SATDUMP_LEGACY_CLI
+          value: "${AAGASA_SATDUMP_LEGACY_CLI}"
         - name: AAGASA_HEARTBEAT_INTERVAL_SECONDS
-          value: "5"
+          value: "${AAGASA_HEARTBEAT_INTERVAL_SECONDS}"
         - name: AAGASA_WORKER_SHARED_SECRET
           valueFrom:
             secretKeyRef:

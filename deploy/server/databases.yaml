@@ -1,12 +1,8 @@
-# The datastores the Aagasa Server depends on.
+# Aagasa datastores pod (PostgreSQL, Redis, MongoDB).
+# Deployed with: podman kube play --network aagasa-net deploy/server/databases.yaml
 #
-# Separate from the Server pod so the two restart independently: a Server
-# upgrade must not take the databases down with it, and the databases coming
-# back must not require the Server to be reinstalled.
-#
-# Data lives on the host under /var/lib/aagasa, which is what gets backed up
-# (deploy/README.md). Ports bind to the loopback interface only: nothing here
-# is meant to be reachable from the network.
+# EDIT THE PASSWORDS/VALUES BELOW.
+# PostgreSQL password must match AAGASA_POSTGRES_URL in deploy/server/.env.
 apiVersion: v1
 kind: Pod
 metadata:
@@ -23,12 +19,7 @@ spec:
         - name: POSTGRES_USER
           value: "aagasa"
         - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: aagasa-postgres-password
-              key: value
-        # Keeps the data directory a plain subdirectory, so a host mount with
-        # lost+found in it does not stop initdb.
+          value: "fb874ba79b2e400bfa8e8443e989fbdfc73d872bcb02eae8"
         - name: PGDATA
           value: "/var/lib/postgresql/data/pgdata"
       ports:
@@ -45,8 +36,6 @@ spec:
 
     - name: redis
       image: docker.io/library/redis:7-alpine
-      # Sessions only, and they are rebuildable by signing in again, so
-      # persistence is deliberately off.
       args: ["redis-server", "--save", "", "--appendonly", "no"]
       ports:
         - containerPort: 6379
