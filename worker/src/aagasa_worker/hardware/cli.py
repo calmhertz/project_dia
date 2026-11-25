@@ -16,7 +16,7 @@ from aagasa_worker.config import Config, load_config
 from aagasa_worker.hardware.errors import HardwareError
 from aagasa_worker.hardware.rotator import G550Rotator
 from aagasa_worker.hardware.satdump import SatDump
-from aagasa_worker.hardware.sdr import RTLSDRProbe
+from aagasa_worker.hardware.sdr import RTLSDRProbe, RTLTCPProbe
 from aagasa_worker.hardware.station import Station
 
 logger = logging.getLogger("aagasa_worker.hardware")
@@ -25,6 +25,13 @@ logger = logging.getLogger("aagasa_worker.hardware")
 def build_station(config: Config) -> Station:
     """Assemble the station from configuration."""
     pipeline_dirs = [config.satdump_pipelines_dir] if config.satdump_pipelines_dir else None
+    if config.sdr_source in ("rtltcp", "rtl_tcp"):
+        sdr = RTLTCPProbe(host=config.rtltcp_host, port=config.rtltcp_port)
+    else:
+        sdr = RTLSDRProbe(
+            rtl_test_binary=config.rtl_test_binary,
+            device_index=config.sdr_device_index,
+        )
     return Station(
         rotator=G550Rotator(
             port=config.rotator_serial_port,
@@ -32,12 +39,12 @@ def build_station(config: Config) -> Station:
             park_azimuth=config.rotator_park_azimuth,
             park_elevation=config.rotator_park_elevation,
         ),
-        sdr=RTLSDRProbe(
-            rtl_test_binary=config.rtl_test_binary,
-            device_index=config.sdr_device_index,
-        ),
+        sdr=sdr,
         satdump=SatDump(binary=config.satdump_binary, pipeline_dirs=pipeline_dirs,
-                        legacy_cli=config.satdump_legacy_cli),
+                        legacy_cli=config.satdump_legacy_cli,
+                        sdr_source=config.sdr_source,
+                        rtltcp_host=config.rtltcp_host,
+                        rtltcp_port=config.rtltcp_port),
     )
 
 

@@ -29,6 +29,9 @@ class Config:
 
     sdr_device_index: int
     rtl_test_binary: str
+    sdr_source: str
+    rtltcp_host: str
+    rtltcp_port: int
 
     satdump_binary: str
     satdump_pipelines_dir: str
@@ -59,6 +62,9 @@ def load_config() -> Config:
         rotator_park_elevation=_env_degrees("AAGASA_ROTATOR_PARK_ELEVATION", 0, 0, 90),
         sdr_device_index=_env_index("AAGASA_SDR_DEVICE_INDEX", 0),
         rtl_test_binary=_env("AAGASA_RTL_TEST_BIN", "rtl_test"),
+        sdr_source=_env("AAGASA_SDR_SOURCE", "rtlsdr").lower(),
+        rtltcp_host=_env("AAGASA_RTLTCP_HOST", "host.containers.internal"),
+        rtltcp_port=_env_int("AAGASA_RTLTCP_PORT", 1234),
         satdump_binary=_env("AAGASA_SATDUMP_BIN", "satdump"),
         satdump_pipelines_dir=_env("AAGASA_SATDUMP_PIPELINES_DIR", ""),
         satdump_legacy_cli=_env_bool("AAGASA_SATDUMP_LEGACY_CLI", False),

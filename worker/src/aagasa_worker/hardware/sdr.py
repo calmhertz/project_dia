@@ -7,6 +7,7 @@ directly; this module only answers "is the radio present and free?".
 
 import logging
 import re
+import socket
 import subprocess
 
 from aagasa_worker.hardware.errors import SDRError
@@ -17,6 +18,7 @@ PROBE_TIMEOUT_SECONDS = 15
 
 _DEVICE_LINE = re.compile(r"^\s*(\d+):\s+(.+)$")
 _NO_DEVICES = "no supported devices found"
+_OPEN_ERRORS = ("usb_open error", "failed to open rtlsdr device")
 
 
 class RTLSDRProbe:
@@ -46,11 +48,13 @@ class RTLSDRProbe:
             raise SDRError(f"{self._binary} did not respond") from error
 
         output = f"{completed.stdout}\n{completed.stderr}"
-        lowered = output.lower()
-        if _NO_DEVICES in lowered:
+        if _NO_DEVICES in output.lower():
             return []
-        if "usb_open error" in lowered or "failed to open rtlsdr device" in lowered:
-            return []
+        for line in output.splitlines():
+            if any(error in line.lower() for error in _OPEN_ERRORS):
+                raise SDRError(
+                    "RTL-SDR device is present but cannot be opened "
+                    f"({line.strip()}); check device permissions and other consumers")
 
         devices = []
         for line in output.splitlines():
@@ -70,4 +74,31 @@ class RTLSDRProbe:
             )
         description = devices[self._device_index]
         logger.info("rtl-sdr detected index=%d device=%s", self._device_index, description)
+        return description
+
+
+class RTLTCPProbe:
+    """Checks the host-side rtl_tcp bridge instead of the local USB device.
+
+    The bridge owns the actual RTL-SDR, so a successful TCP connection means
+    the radio is available to SatDump's rtltcp source.
+    """
+
+    def __init__(self, host: str = "host.containers.internal", port: int = 1234,
+                 timeout_seconds: float = 5.0):
+        self._host = host
+        self._port = port
+        self._timeout_seconds = timeout_seconds
+
+    def check(self) -> str:
+        """Confirm the bridge accepts connections and return its address."""
+        try:
+            with socket.create_connection(
+                    (self._host, self._port), timeout=self._timeout_seconds):
+                pass
+        except OSError as error:
+            raise SDRError(
+                f"RTL-TCP bridge {self._host}:{self._port} unavailable: {error}") from error
+        description = f"RTL-TCP {self._host}:{self._port}"
+        logger.info("rtl-sdr detected via %s", description)
         return description

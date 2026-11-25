@@ -42,6 +42,25 @@ def pipeline_dir(tmp_path):
     return directory
 
 
+@pytest.fixture
+def meteor_pipeline_dir(tmp_path):
+    """One live pipeline whose JSON declares primary and backup downlinks."""
+    directory = tmp_path / "meteor_pipelines"
+    directory.mkdir()
+    (directory / "Meteor-M.json").write_text(json.dumps({
+        "meteor_m2-x_lrpt": {
+            "name": "METEOR M2 LRPT",
+            "live": True,
+            "frequencies": [
+                ["Primary", 137.9e6],
+                ["Backup", 137.1e6],
+            ],
+            "work": {},
+        },
+    }))
+    return directory
+
+
 def test_discovers_pipelines_from_files(pipeline_dir):
     pipelines = discover_pipelines([pipeline_dir])
 
@@ -53,6 +72,25 @@ def test_discovers_pipelines_from_files(pipeline_dir):
     assert by_id["noaa_apt"].supports_live is True
     assert by_id["noaa_hrpt"].supports_live is False
     assert by_id["ace_s_link"].source_file == "ACE.json"
+
+
+def test_discovers_the_primary_frequency_declared_by_a_pipeline(meteor_pipeline_dir):
+    pipeline = discover_pipelines([meteor_pipeline_dir])[0]
+
+    assert pipeline.primary_frequency_hz == 137_900_000
+
+
+def test_unusable_frequency_declarations_do_not_break_discovery(tmp_path):
+    directory = tmp_path / "odd_pipelines"
+    directory.mkdir()
+    (directory / "Odd.json").write_text(json.dumps({
+        "broken_freq": {"frequencies": [["Primary", "unknown"]]},
+        "empty_freq": {"frequencies": []},
+    }))
+
+    pipelines = discover_pipelines([directory])
+
+    assert all(pipeline.primary_frequency_hz is None for pipeline in pipelines)
 
 
 def test_one_malformed_file_does_not_hide_the_rest(pipeline_dir):
@@ -120,12 +158,49 @@ def test_live_command_shape():
     assert command[command.index("--samplerate") + 1] == "2048000"
 
 
+def test_live_command_uses_the_pipelines_primary_frequency(meteor_pipeline_dir):
+    satdump = SatDump(binary="satdump", pipeline_dirs=[meteor_pipeline_dir])
+    command = satdump.build_live_command(
+        "meteor_m2-x_lrpt", "/out/pass-1", 137_100_000, SDR_SETTINGS)
+
+    assert command[command.index("--frequency") + 1] == "137900000"
+
+
+def test_live_command_can_use_an_rtl_tcp_bridge():
+    satdump = SatDump(binary="satdump", sdr_source="rtltcp",
+                      rtltcp_host="bridge.example", rtltcp_port=4321)
+    command = satdump.build_live_command(
+        "noaa_apt", "/out/pass-1", 137_100_000, SDR_SETTINGS)
+
+    assert command[command.index("--source") + 1] == "rtltcp"
+    assert command[command.index("--ip_address") + 1] == "bridge.example"
+    assert command[command.index("--port") + 1] == "4321"
+
+
 def test_record_command_requests_baseband():
     command = SatDump(binary="satdump").build_record_command(
         "/out/pass-1", 137_100_000, SDR_SETTINGS)
 
     assert command[:3] == ["satdump", "record", "/out/pass-1"]
     assert command[command.index("--baseband_format") + 1] == "ziq"
+
+
+def test_record_command_keeps_the_plan_frequency(meteor_pipeline_dir):
+    satdump = SatDump(binary="satdump", pipeline_dirs=[meteor_pipeline_dir])
+    command = satdump.build_record_command(
+        "/out/pass-1", 137_100_000, SDR_SETTINGS)
+
+    assert command[command.index("--frequency") + 1] == "137100000"
+
+
+def test_record_command_can_use_an_rtl_tcp_bridge():
+    satdump = SatDump(binary="satdump", sdr_source="rtltcp")
+    command = satdump.build_record_command(
+        "/out/pass-1", 137_100_000, SDR_SETTINGS)
+
+    assert command[command.index("--source") + 1] == "rtltcp"
+    assert command[command.index("--ip_address") + 1] == "host.containers.internal"
+    assert command[command.index("--port") + 1] == "1234"
 
 
 def test_legacy_cli_prefixes_v2_commands():

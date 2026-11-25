@@ -385,11 +385,17 @@ class StationPassHandler:
         """A pass counts as completed when it actually captured something.
 
         Pointing problems are recorded but do not by themselves fail the pass:
-        a recording made with a stuck antenna is still worth keeping.
+        a recording made with a stuck antenna is still worth keeping. An empty
+        CADU beside a full SatDump log is not a decoded pass, though. This
+        SatDump build can segfault while shutting down after a clean timeout;
+        a non-empty product still makes that a usable pass.
         """
-        if not report.capture_started:
+        if not report.capture_started or report.capture_failed:
             return False
-        return not report.capture_failed
+        if not _has_product(report.output_path):
+            report.problems.append("no non-empty decoded output was produced")
+            return False
+        return True
 
 
 def capture_start(stored: StoredPlan) -> datetime:
@@ -412,6 +418,28 @@ def capture_start(stored: StoredPlan) -> datetime:
 
 def _to_datetime(timestamp) -> datetime:
     return timestamp.ToDatetime(tzinfo=timezone.utc)
+
+
+def _has_product(output_path: str) -> bool:
+    """True when a capture directory holds a non-empty product file.
+
+    SatDump's log is not a product: a failed live decode can leave a large log
+    beside a zero-byte CADU file, and that must still count as no output.
+    """
+    if not output_path:
+        return False
+    directory = Path(output_path)
+    if not directory.is_dir():
+        return False
+    for entry in directory.rglob("*"):
+        if not entry.is_file() or entry.name == LOG_FILE_NAME:
+            continue
+        try:
+            if entry.stat().st_size > 0:
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _dir_size_bytes(path: Path) -> int:

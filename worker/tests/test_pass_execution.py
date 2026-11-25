@@ -5,6 +5,7 @@ whole execution sequence runs for real without a G-550 or an RTL-SDR attached.
 Only the physical devices are absent.
 """
 
+import json
 import stat
 import textwrap
 import threading
@@ -18,12 +19,13 @@ from google.protobuf.timestamp_pb2 import Timestamp
 from aagasa.worker.v1 import passplan_pb2
 
 from aagasa_worker.hardware.rotator import G550Rotator
-from aagasa_worker.hardware.satdump import SatDump
+from aagasa_worker.hardware.satdump import ProcessResult, SatDump
 from aagasa_worker.hardware.sdr import RTLSDRProbe
 from aagasa_worker.hardware.station import Station
 from aagasa_worker import pass_execution
 from aagasa_worker.pass_execution import (
     MIN_POINTING_CHANGE_DEGREES,
+    ExecutionReport,
     PlanNotExecutable,
     StationPassHandler,
     capture_start,
@@ -128,6 +130,19 @@ SATDUMP_STUB = """
     time.sleep(300)
 """
 
+EMPTY_CADU_STUB = """
+    import os, signal, sys, time
+    args = sys.argv[1:]
+    out = args[2] if args[0] == 'live' else args[1]
+    def finish(signum, frame):
+        sys.exit(0)
+    signal.signal(signal.SIGTERM, finish)
+    os.makedirs(out, exist_ok=True)
+    open(os.path.join(out, 'meteor_m2-x_lrpt.cadu'), 'wb').close()
+    print('capture running', flush=True)
+    time.sleep(300)
+"""
+
 RTL_PRESENT = """
     import sys
     print('  0:  Realtek, RTL2838UHIDIR, SN: 1', file=sys.stderr)
@@ -146,7 +161,7 @@ def station_parts(tmp_path):
     writes = []
 
     def build(rotator_fails=False, sdr_present=True, satdump_body=SATDUMP_STUB,
-              satdump_name="satdump_stub.py"):
+              satdump_name="satdump_stub.py", pipeline_definition=None):
         rotator = G550Rotator(
             "/dev/ttyTEST", 9600, park_azimuth=180, park_elevation=5,
             serial_factory=RecordingSerial(writes, fail=rotator_fails))
@@ -155,7 +170,10 @@ def station_parts(tmp_path):
         satdump_path = make_stub(tmp_path, satdump_name, satdump_body)
         pipelines = tmp_path / "pipelines"
         pipelines.mkdir(exist_ok=True)
-        (pipelines / "P.json").write_text('{"noaa_apt": {"name": "NOAA APT", "live": true}}')
+        definition = pipeline_definition if pipeline_definition is not None else {
+            "noaa_apt": {"name": "NOAA APT", "live": True},
+        }
+        (pipelines / "P.json").write_text(json.dumps(definition))
         station = Station(
             rotator=rotator,
             sdr=RTLSDRProbe(rtl_test_binary=rtl),
@@ -261,6 +279,73 @@ def test_process_mode_runs_a_live_decode(station_parts, tmp_path):
     assert "--bias" in command
     assert command[command.index("--ppm_correction") + 1] == "3"
     assert "--timeout" in command
+
+
+def test_process_mode_uses_the_pipelines_primary_frequency(station_parts, tmp_path):
+    station, _ = station_parts(pipeline_definition={
+        "meteor_m2-x_lrpt": {
+            "name": "METEOR M2 LRPT",
+            "live": True,
+            "frequencies": [["Primary", 137.9e6], ["Backup", 137.1e6]],
+        },
+    })
+    plan = build_plan(mode=passplan_pb2.RECORDING_MODE_PROCESS,
+                      pipeline="meteor_m2-x_lrpt")
+    started = {}
+
+    original = station.satdump.start
+
+    def capture_command(command, **kwargs):
+        started["command"] = command
+        return original(command, **kwargs)
+
+    station.satdump.start = capture_command
+    run_pass(station, tmp_path, plan)
+
+    command = started["command"]
+    assert command[2] == "meteor_m2-x_lrpt"
+    assert command[command.index("--frequency") + 1] == "137900000"
+
+
+def test_a_capture_with_only_an_empty_cadu_fails_the_pass(station_parts, tmp_path):
+    station, _ = station_parts(satdump_body=EMPTY_CADU_STUB)
+    plan = build_plan()
+
+    outcome, _ = run_pass(station, tmp_path, plan)
+
+    assert outcome.succeeded is False
+    assert "no non-empty decoded output" in outcome.detail
+
+
+def test_a_shutdown_segfault_does_not_fail_a_pass_with_output(tmp_path):
+    output = tmp_path / "out"
+    output.mkdir()
+    (output / "meteor.cadu").write_bytes(b"x" * 1024)
+    report = ExecutionReport(
+        capture_started=True,
+        capture_result=ProcessResult(
+            succeeded=True, exit_code=-11, stdout="", stderr="", terminated=True),
+        output_path=str(output),
+        output_bytes=1024,
+    )
+
+    assert StationPassHandler._succeeded(report) is True
+
+
+def test_a_shutdown_segfault_still_fails_a_pass_without_output(tmp_path):
+    output = tmp_path / "out"
+    output.mkdir()
+    (output / "meteor.cadu").touch()
+    (output / "satdump.log").write_text("Done! Goodbye")
+    report = ExecutionReport(
+        capture_started=True,
+        capture_result=ProcessResult(
+            succeeded=True, exit_code=-11, stdout="", stderr="", terminated=True),
+        output_path=str(output),
+        output_bytes=14,
+    )
+
+    assert StationPassHandler._succeeded(report) is False
 
 
 def test_raw_mode_records_baseband(station_parts, tmp_path):

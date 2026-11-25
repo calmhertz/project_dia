@@ -95,6 +95,32 @@ def parse_pipeline_file(text: str) -> dict:
         return json.loads(strip_jsonc_comments(text))
 
 
+def _primary_frequency_hz(definition: dict) -> int | None:
+    """Return the first declared frequency of a pipeline, in Hz.
+
+    SatDump pipelines declare a list such as::
+
+        "frequencies": [["Primary", 137.9e6], ["Backup", 137.1e6]]
+
+    The first usable entry is the one SatDump's own GUI selects by default.
+    """
+    frequencies = definition.get("frequencies")
+    if not isinstance(frequencies, list):
+        return None
+
+    for entry in frequencies:
+        value = entry[1] if isinstance(entry, (list, tuple)) and len(entry) > 1 else entry
+        if isinstance(value, bool) or value is None:
+            continue
+        try:
+            frequency_hz = int(float(value))
+        except (TypeError, ValueError):
+            continue
+        if frequency_hz > 0:
+            return frequency_hz
+    return None
+
+
 @dataclass(frozen=True)
 class Pipeline:
     """One SatDump pipeline as offered to the scheduling UI."""
@@ -103,6 +129,7 @@ class Pipeline:
     name: str
     supports_live: bool
     source_file: str
+    primary_frequency_hz: int | None = None
 
 
 @dataclass(frozen=True)
@@ -149,6 +176,7 @@ def discover_pipelines(pipeline_dirs=None) -> list[Pipeline]:
                     name=str(definition.get("name", identifier)),
                     supports_live=bool(definition.get("live", False)),
                     source_file=path.name,
+                    primary_frequency_hz=_primary_frequency_hz(definition),
                 )
 
     return sorted(found.values(), key=lambda pipeline: pipeline.identifier)
@@ -158,10 +186,15 @@ class SatDump:
     """Runs SatDump and reports deterministic results."""
 
     def __init__(self, binary: str = "satdump", pipeline_dirs=None,
-                 legacy_cli: bool = False):
+                 legacy_cli: bool = False, sdr_source: str = "rtlsdr",
+                 rtltcp_host: str = "host.containers.internal",
+                 rtltcp_port: int = 1234):
         self._binary = binary
         self._pipeline_dirs = pipeline_dirs
         self._legacy_cli = legacy_cli
+        self._sdr_source = sdr_source.lower()
+        self._rtltcp_host = rtltcp_host
+        self._rtltcp_port = rtltcp_port
 
     def check(self) -> str:
         """Confirm SatDump is installed and return its resolved path."""
@@ -177,22 +210,54 @@ class SatDump:
     def has_pipeline(self, identifier: str) -> bool:
         return any(pipeline.identifier == identifier for pipeline in self.pipelines())
 
+    def _declared_frequency(self, identifier: str) -> int | None:
+        for pipeline in self.pipelines():
+            if pipeline.identifier == identifier:
+                return pipeline.primary_frequency_hz
+        return None
+
+    def _source(self, sdr_settings: dict) -> str:
+        if self._sdr_source in ("rtltcp", "rtl_tcp"):
+            return "rtltcp"
+        return str(sdr_settings.get("source", self._sdr_source))
+
+    def _source_args(self, sdr_settings: dict) -> list[str]:
+        if self._sdr_source not in ("rtltcp", "rtl_tcp"):
+            return []
+        return [
+            "--ip_address", str(sdr_settings.get("ip_address", self._rtltcp_host)),
+            "--port", str(int(sdr_settings.get("port", self._rtltcp_port))),
+        ]
+
     def build_live_command(self, pipeline: str, output_dir: str, frequency_hz: int,
                            sdr_settings: dict) -> list[str]:
         """Build a live-decode command line.
 
         Mirrors the invocation shape proven by the reference implementation.
+        A pipeline's own Primary frequency wins over the one in the plan: the
+        plan only knows the station band centre, while the pipeline definition
+        knows which downlink the decoder expects.
         """
+        requested_hz = int(frequency_hz)
+        declared_hz = self._declared_frequency(pipeline)
+        if declared_hz is not None:
+            if declared_hz != requested_hz:
+                logger.info("pipeline %s uses declared frequency %s Hz "
+                            "instead of plan frequency %s Hz",
+                            pipeline, declared_hz, requested_hz)
+            frequency_hz = declared_hz
+
         command = [self._binary]
         if self._legacy_cli:
             command.append("legacy")
         command += [
             "live", pipeline, output_dir,
-            "--source", str(sdr_settings.get("source", "rtlsdr")),
+            "--source", self._source(sdr_settings),
             "--frequency", str(int(frequency_hz)),
             "--samplerate", str(int(sdr_settings["samplerate"])),
             "--gain", str(sdr_settings["gain"]),
         ]
+        command += self._source_args(sdr_settings)
         if sdr_settings.get("ppm"):
             command += ["--ppm_correction", str(int(sdr_settings["ppm"]))]
         if sdr_settings.get("bias_tee"):
@@ -207,12 +272,13 @@ class SatDump:
             command.append("legacy")
         command += [
             "record", output_path,
-            "--source", str(sdr_settings.get("source", "rtlsdr")),
+            "--source", self._source(sdr_settings),
             "--frequency", str(int(frequency_hz)),
             "--samplerate", str(int(sdr_settings["samplerate"])),
             "--gain", str(sdr_settings["gain"]),
             "--baseband_format", str(sdr_settings.get("baseband_format", "ziq")),
         ]
+        command += self._source_args(sdr_settings)
         if sdr_settings.get("ppm"):
             command += ["--ppm_correction", str(int(sdr_settings["ppm"]))]
         if sdr_settings.get("bias_tee"):

@@ -28,6 +28,21 @@ def test_defaults(valid_env):
     assert config.rotator_baud_rate == 9600
     assert config.heartbeat_interval_seconds == 5
     assert config.server_tls_enabled is True
+    assert config.sdr_source == "rtlsdr"
+    assert config.rtltcp_host == "host.containers.internal"
+    assert config.rtltcp_port == 1234
+
+
+def test_rtltcp_bridge_settings(valid_env):
+    valid_env.setenv("AAGASA_SDR_SOURCE", "rtltcp")
+    valid_env.setenv("AAGASA_RTLTCP_HOST", "bridge.example")
+    valid_env.setenv("AAGASA_RTLTCP_PORT", "4321")
+
+    config = load_config()
+
+    assert config.sdr_source == "rtltcp"
+    assert config.rtltcp_host == "bridge.example"
+    assert config.rtltcp_port == 4321
 
 
 @pytest.mark.parametrize("name", sorted(REQUIRED))

@@ -1,6 +1,7 @@
 """RTL-SDR probing and station hardware lifecycle."""
 
 import shutil
+import socket
 import stat
 import subprocess
 import textwrap
@@ -11,7 +12,7 @@ import pytest
 from aagasa_worker.hardware.errors import RotatorError, SDRError
 from aagasa_worker.hardware.rotator import G550Rotator
 from aagasa_worker.hardware.satdump import SatDump
-from aagasa_worker.hardware.sdr import RTLSDRProbe
+from aagasa_worker.hardware.sdr import RTLSDRProbe, RTLTCPProbe
 from aagasa_worker.hardware.station import Station
 
 
@@ -42,6 +43,43 @@ def test_check_raises_when_no_device_is_attached(tmp_path):
 
     with pytest.raises(SDRError, match="no RTL-SDR device detected"):
         RTLSDRProbe(rtl_test_binary=stub).check()
+
+
+def test_an_unopenable_device_is_reported_as_a_permission_problem(tmp_path):
+    stub = make_stub(tmp_path, "rtl_test_locked.py", """
+        import sys
+        print("Found 1 device(s):", file=sys.stderr)
+        print("  0:  , , SN: 00000001", file=sys.stderr)
+        print("usb_open error -3", file=sys.stderr)
+        print("Failed to open rtlsdr device #0.", file=sys.stderr)
+        sys.exit(1)
+    """)
+
+    with pytest.raises(SDRError, match="present but cannot be opened"):
+        RTLSDRProbe(rtl_test_binary=stub).check()
+
+
+def test_rtltcp_probe_accepts_a_live_bridge():
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    try:
+        probe = RTLTCPProbe(host="127.0.0.1", port=port, timeout_seconds=1)
+
+        assert f"127.0.0.1:{port}" in probe.check()
+    finally:
+        listener.close()
+
+
+def test_rtltcp_probe_reports_a_missing_bridge():
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    listener.close()
+
+    with pytest.raises(SDRError, match="unavailable"):
+        RTLTCPProbe(host="127.0.0.1", port=port, timeout_seconds=1).check()
 
 
 def test_attached_device_is_parsed(tmp_path):
@@ -81,7 +119,12 @@ def test_real_rtl_test_runs_if_installed():
     if shutil.which("rtl_test") is None:
         pytest.skip("rtl_test is not installed")
 
-    assert isinstance(RTLSDRProbe().list_devices(), list)
+    try:
+        devices = RTLSDRProbe().list_devices()
+    except SDRError as error:
+        assert "cannot be opened" in str(error)
+    else:
+        assert isinstance(devices, list)
 
 
 
