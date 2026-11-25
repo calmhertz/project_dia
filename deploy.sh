@@ -2,15 +2,19 @@
 #
 # Aagasa ground station deployment.
 #
-#   ./deploy.sh up        start everything (builds first if no images exist)
-#   ./deploy.sh down      stop and remove the containers; data is kept
-#   ./deploy.sh restart   down, then up
-#   ./deploy.sh rebuild   rebuild the web client and the images, then restart
-#   ./deploy.sh reset     delete the database and station state, rebuild, start
+#   ./deploy.sh <server|worker|both> up        start the target (builds first if needed)
+#   ./deploy.sh <server|worker|both> down     stop and remove the target's containers; data is kept
+#   ./deploy.sh <server|worker|both> restart  down, then up
+#   ./deploy.sh <server|worker|both> rebuild  rebuild the target's images, then restart
+#   ./deploy.sh <server|worker|both> reset    delete the target's state, rebuild, start
+#
+#   server  databases + server/prediction
+#   worker  worker only
+#   both    the whole station
 #
 # Missing env files are created on first run: secrets are generated and the
-# station-specific details are asked for. 'up' also makes the station start at
-# boot (a systemd user service); 'down' turns that off again.
+# station-specific details are asked for. 'both up' also makes the station start
+# at boot (a systemd user service); 'both down' turns that off again.
 
 set -uo pipefail
 
@@ -19,7 +23,9 @@ SERVER_ENV="$ROOT/deploy/server/.env.server"
 WORKER_ENV="$ROOT/deploy/worker/.env.worker"
 DATA="${AAGASA_DATA_DIR:-$ROOT/data}"
 NETWORK="aagasa-net"
-PODS=(aagasa-worker-pod aagasa-server-pod aagasa-databases)
+PODS_BOTH=(aagasa-worker-pod aagasa-server-pod aagasa-databases)
+PODS_SERVER=(aagasa-server-pod aagasa-databases)
+PODS_WORKER=(aagasa-worker-pod)
 UNIT="aagasa.service"
 UNIT_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$UNIT"
 # Set by the systemd unit, so boot-time runs never change the boot setting.
@@ -29,6 +35,22 @@ say()  { printf '\n== %s\n' "$1"; }
 note() { printf '   %s\n' "$1"; }
 warn() { printf '!! %s\n' "$1" >&2; }
 die()  { printf 'deploy: %s\n' "$1" >&2; exit 1; }
+
+usage() {
+    cat <<'EOF'
+Usage: ./deploy.sh <server|worker|both> <up|down|restart|rebuild|reset>
+
+  server  databases + server/prediction
+  worker  worker only
+  both    the whole station
+
+  up        start the target (builds first if needed)
+  down      stop and remove the target's containers; data is kept
+  restart   down, then up
+  rebuild   rebuild the target's images, then restart
+  reset     delete the target's state, rebuild, start (add --yes to skip the prompt)
+EOF
+}
 
 # ---------------------------------------------------------------- env files
 
@@ -57,8 +79,17 @@ env_value() { sed -n "s/^$2=//p" "$1" 2>/dev/null | tail -1; }
 
 secret() { od -An -N24 -tx1 /dev/urandom | tr -d ' \n'; }
 
-ensure_env() {
-    [[ -f "$SERVER_ENV" && -f "$WORKER_ENV" ]] && return
+ensure_env_for() {  # ensure_env_for <server|worker|both>
+    local target="$1"
+    local need_server=false need_worker=false
+    case "$target" in
+        server) need_server=true ;;
+        worker) need_worker=true ;;
+        both)   need_server=true; need_worker=true ;;
+    esac
+    [[ "$need_server" == true && -f "$SERVER_ENV" ]] && need_server=false
+    [[ "$need_worker" == true && -f "$WORKER_ENV" ]] && need_worker=false
+    [[ "$need_server" == false && "$need_worker" == false ]] && return
 
     say "Creating missing configuration"
     local shared
@@ -66,15 +97,15 @@ ensure_env() {
     shared="${shared:-$(env_value "$WORKER_ENV" AAGASA_WORKER_SHARED_SECRET)}"
     shared="${shared:-$(secret)}"
 
-    if [[ ! -f "$SERVER_ENV" ]]; then
+    if [[ "$need_server" == true ]]; then
         if [[ -d "$DATA/postgres" ]]; then
             die "$SERVER_ENV is missing but a database exists in $DATA/postgres;
-   its password is unknown. Restore the env file, or run './deploy.sh reset'."
+   its password is unknown. Restore the env file, or run './deploy.sh server reset --yes'."
         fi
         write_server_env "$(secret)" "$shared"
         note "wrote $SERVER_ENV"
     fi
-    if [[ ! -f "$WORKER_ENV" ]]; then
+    if [[ "$need_worker" == true ]]; then
         note "Station details (press Enter to keep the value in brackets):"
         write_worker_env "$shared"
         note "wrote $WORKER_ENV"
@@ -169,7 +200,7 @@ install_web() {
     say "Installing the web client"
     local web_src=""
     local candidate
-    for candidate in "$ROOT/client/build/web" "$ROOT/client/web"; do
+    for candidate in "$ROOT/client/build/web" "$ROOT/server/web"; do
         if [[ -f "$candidate/main.dart.js" && -f "$candidate/index.html" ]]; then
             web_src="$candidate"
             break
@@ -189,10 +220,7 @@ web_hash() {
         || die "cannot hash the web client"
 }
 
-build() {
-    command -v podman >/dev/null || die "podman is required"
-    [[ -f "$ROOT/deploy/worker/satdump.deb" ]] \
-        || die "deploy/worker/satdump.deb is required; put the SatDump .deb there"
+build_server() {
     ensure_stubs
     install_web
 
@@ -205,9 +233,26 @@ build() {
     say "Building the prediction image"
     podman build -f deploy/server/Containerfile.prediction -t aagasa-prediction:latest . \
         || die "prediction image build failed"
+}
+
+build_worker() {
+#    [[ -f "$ROOT/deploy/worker/satdump.deb" ]] \
+#        || die "deploy/worker/satdump.deb is required; put the SatDump .deb there"
+#    ensure_stubs
+#    cd "$ROOT" || die "cannot enter $ROOT"
     say "Building the worker image"
     podman build -f deploy/worker/Containerfile -t aagasa-worker:latest . \
         || die "worker image build failed"
+}
+
+build_for() {  # build_for <server|worker|both>
+    local target="$1"
+    command -v podman >/dev/null || die "podman is required"
+    case "$target" in
+        server) build_server ;;
+        worker) build_worker ;;
+        both)   build_server; build_worker ;;
+    esac
 }
 
 # The gRPC stubs are generated, not hand-written; make them on a fresh clone.
@@ -235,11 +280,17 @@ ensure_stubs() {
         "${worker_protos[@]/#proto/../proto}") || die "protoc (worker) failed"
 }
 
-images_exist() {
-    local image
-    for image in aagasa-server aagasa-prediction aagasa-worker; do
+images_exist_for() {  # images_exist_for <server|worker|both>
+    local target="$1" image images=()
+    case "$target" in
+        server) images=(aagasa-server aagasa-prediction) ;;
+        worker) images=(aagasa-worker) ;;
+        both)   images=(aagasa-server aagasa-prediction aagasa-worker) ;;
+    esac
+    for image in "${images[@]}"; do
         podman image exists "localhost/$image:latest" || return 1
     done
+    return 0
 }
 
 # ------------------------------------------------------------------ run
@@ -257,102 +308,133 @@ server_ready() {
     curl -fsS --max-time 3 http://127.0.0.1:8080/readyz | grep -q '"status":"ready"'
 }
 
-running() {
-    local pod
-    for pod in "${PODS[@]}"; do
+running_for() {  # running_for <server|worker|both>
+    local target="$1" pod pods=()
+    case "$target" in
+        server) pods=("${PODS_SERVER[@]}") ;;
+        worker) pods=("${PODS_WORKER[@]}") ;;
+        both)   pods=("${PODS_BOTH[@]}") ;;
+    esac
+    for pod in "${pods[@]}"; do
         [[ "$(podman pod inspect --format '{{.State}}' "$pod" 2>/dev/null)" == "Running" ]] \
             || return 1
     done
+    return 0
 }
 
-start() {
+start_for() {  # start_for <server|worker|both>
+    local target="$1"
     command -v podman >/dev/null || die "podman is required"
-    if running; then
-        note "already running at http://127.0.0.1:8080; use './deploy.sh restart' to restart"
+    if running_for "$target"; then
+        note "already running; use './deploy.sh $target restart' to restart"
         return
     fi
-    ensure_env
-    install_web
-    local image_hash
-    image_hash="$(podman image inspect --format '{{index .Config.Labels "aagasa.web.hash"}}' \
-        localhost/aagasa-server:latest 2>/dev/null || true)"
-    if ! images_exist || [[ "$image_hash" != "$(web_hash)" ]]; then
-        build
-    fi
-    stop >/dev/null  # clear anything left over from a half-finished start
+    ensure_env_for "$target"
 
-    mkdir -p "$DATA"/{postgres,mongo,redis,recordings,pipelines,worker-state}
+    if [[ "$target" == worker ]]; then
+        images_exist_for worker || build_for worker
+    else
+        install_web
+        local image_hash
+        image_hash="$(podman image inspect --format '{{index .Config.Labels "aagasa.web.hash"}}' \
+            localhost/aagasa-server:latest 2>/dev/null || true)"
+        if ! images_exist_for server || [[ "$image_hash" != "$(web_hash)" ]]; then
+            build_for server
+        fi
+    fi
+    stop_for "$target" >/dev/null  # clear anything left over from a half-finished start
+
+    if [[ "$target" == worker ]]; then
+        mkdir -p "$DATA"/{recordings,pipelines,worker-state}
+    else
+        mkdir -p "$DATA"/{postgres,mongo,redis,recordings,pipelines,worker-state}
+    fi
     podman unshare chown -R 0:0 "$DATA/worker-state" 2>/dev/null || true
     chmod a+rwX "$DATA"/{redis,recordings,pipelines,worker-state} 2>/dev/null || true
     podman network exists "$NETWORK" || podman network create "$NETWORK" >/dev/null
 
-    say "Databases"
-    local rendered
-    rendered="$(mktemp)"
-    sed -e "s|/var/lib/aagasa|$DATA|g" \
-        -e "s|__POSTGRES_PASSWORD__|$(postgres_password)|" \
-        "$ROOT/deploy/server/databases.yaml" > "$rendered"
-    podman kube play --network "$NETWORK" "$rendered" >/dev/null
-    local played=$?
-    rm -f "$rendered"
-    [[ $played -eq 0 ]] || die "the database pod did not start"
-    wait_for "postgres" podman exec aagasa-databases-postgres pg_isready -U aagasa
+    local publish=""
+    if [[ "$target" == server || "$target" == both ]]; then
+        say "Databases"
+        local rendered
+        rendered="$(mktemp)"
+        sed -e "s|/var/lib/aagasa|$DATA|g" \
+            -e "s|__POSTGRES_PASSWORD__|$(postgres_password)|" \
+            "$ROOT/deploy/server/databases.yaml" > "$rendered"
+        podman kube play --network "$NETWORK" "$rendered" >/dev/null
+        local played=$?
+        rm -f "$rendered"
+        [[ $played -eq 0 ]] || die "the database pod did not start"
+        wait_for "postgres" podman exec aagasa-databases-postgres pg_isready -U aagasa
 
-    say "Database schema"
-    local migrate=(podman run --rm --network "$NETWORK" --env-file "$SERVER_ENV"
-        localhost/aagasa-server:latest aagasa-migrate)
-    "${migrate[@]}" up >/dev/null || die "postgres migration failed"
-    "${migrate[@]}" mongo-init >/dev/null || die "mongo init failed"
+        say "Database schema"
+        local migrate=(podman run --rm --network "$NETWORK" --env-file "$SERVER_ENV"
+            localhost/aagasa-server:latest aagasa-migrate)
+        "${migrate[@]}" up >/dev/null || die "postgres migration failed"
+        "${migrate[@]}" mongo-init >/dev/null || die "mongo init failed"
 
-    say "Server"
-    # Only the web UI/API is published. The worker reaches gRPC (9090) over
-    # the internal podman network, so it is never exposed on the host.
-    local publish
-    publish="$(env_value "$SERVER_ENV" AAGASA_PUBLISH_ADDRESS)"
-    publish="${publish:-0.0.0.0}"
-    podman pod create --name aagasa-server-pod --network "$NETWORK" \
-        -p "$publish:8080:8080" >/dev/null
-    podman run -d --pod aagasa-server-pod --name aagasa-prediction --restart=always \
-        --env-file "$SERVER_ENV" localhost/aagasa-prediction:latest >/dev/null
-    # The host's tz database, read-only: Debian tzdata updates reach the time
-    # zone list without a rebuild. Never relabelled; it is a system directory.
-    local tz=()
-    [[ -f /usr/share/zoneinfo/zone1970.tab ]] && tz=(-v /usr/share/zoneinfo:/usr/share/zoneinfo:ro)
-    podman run -d --pod aagasa-server-pod --name aagasa-server --restart=always \
-        --env-file "$SERVER_ENV" \
-        -v "$DATA/recordings:/var/lib/aagasa/recordings:Z" \
-        -v "$DATA/pipelines:/var/lib/aagasa/pipelines:Z" \
-        "${tz[@]}" localhost/aagasa-server:latest >/dev/null
-    wait_for "the server (podman logs aagasa-server)" server_ready
-
-    say "Worker"
-    local port devices=()
-    port="$(env_value "$WORKER_ENV" AAGASA_ROTATOR_SERIAL_PORT)"
-    if [[ -n "$port" && -e "$port" ]]; then
-        devices+=(-v "$port:$port")
-    else
-        warn "no rotator at ${port:-<unset>}; passes will record without pointing"
+        say "Server"
+        # Only the web UI/API is published. The worker reaches gRPC (9090) over
+        # the internal podman network, so it is never exposed on the host.
+        publish="$(env_value "$SERVER_ENV" AAGASA_PUBLISH_ADDRESS)"
+        publish="${publish:-0.0.0.0}"
+        podman pod create --name aagasa-server-pod --network "$NETWORK" \
+            -p "$publish:8080:8080" >/dev/null
+        podman run -d --pod aagasa-server-pod --name aagasa-prediction --restart=always \
+            --env-file "$SERVER_ENV" localhost/aagasa-prediction:latest >/dev/null
+        # The host's tz database, read-only: Debian tzdata updates reach the time
+        # zone list without a rebuild. Never relabelled; it is a system directory.
+        local tz=()
+        [[ -f /usr/share/zoneinfo/zone1970.tab ]] && tz=(-v /usr/share/zoneinfo:/usr/share/zoneinfo:ro)
+        podman run -d --pod aagasa-server-pod --name aagasa-server --restart=always \
+            --env-file "$SERVER_ENV" \
+            -v "$DATA/recordings:/var/lib/aagasa/recordings:Z" \
+            -v "$DATA/pipelines:/var/lib/aagasa/pipelines:Z" \
+            "${tz[@]}" localhost/aagasa-server:latest >/dev/null
+        wait_for "the server (podman logs aagasa-server)" server_ready
     fi
-    [[ -d /dev/bus/usb ]] && devices+=(-v /dev/bus/usb:/dev/bus/usb)
-    lsusb 2>/dev/null | grep -qi -E '0bda:283[28]' \
-        || warn "no RTL-SDR on USB; passes will fail until one is plugged in"
-    lsmod 2>/dev/null | grep -q '^dvb_usb_rtl28xxu' \
-        && warn "kernel driver dvb_usb_rtl28xxu is loaded and can block the RTL-SDR"
 
-    podman pod create --name aagasa-worker-pod --network "$NETWORK" \
-        --userns=keep-id:uid=10003,gid=10003 >/dev/null
-    podman run -d --pod aagasa-worker-pod --name aagasa-worker --restart=always \
-        --env-file "$WORKER_ENV" -e HOME=/home/aagasa \
-        -v "$DATA/worker-state:/var/lib/aagasa/state:Z" \
-        -v "$DATA/recordings:/var/lib/aagasa/recordings:Z" \
-        "${devices[@]}" localhost/aagasa-worker:latest
+    if [[ "$target" == worker || "$target" == both ]]; then
+        say "Worker"
+        if [[ "$(podman pod inspect --format '{{.State}}' aagasa-server-pod 2>/dev/null)" != "Running" ]]; then
+            warn "the server is not running; the worker will reconnect once it is"
+        fi
+        local port devices=()
+        port="$(env_value "$WORKER_ENV" AAGASA_ROTATOR_SERIAL_PORT)"
+        if [[ -n "$port" && -e "$port" ]]; then
+            devices+=(-v "$port:$port")
+        else
+            warn "no rotator at ${port:-<unset>}; passes will record without pointing"
+        fi
+        [[ -d /dev/bus/usb ]] && devices+=(-v /dev/bus/usb:/dev/bus/usb)
+        lsusb 2>/dev/null | grep -qi -E '0bda:283[28]' \
+            || warn "no RTL-SDR on USB; passes will fail until one is plugged in"
+        lsmod 2>/dev/null | grep -q '^dvb_usb_rtl28xxu' \
+            && warn "kernel driver dvb_usb_rtl28xxu is loaded and can block the RTL-SDR"
 
-    [[ -n "$FROM_SYSTEMD" ]] || enable_boot
+        podman pod create --name aagasa-worker-pod --network "$NETWORK" \
+            --userns=keep-id:uid=10003,gid=10003 >/dev/null
+        podman run -d --pod aagasa-worker-pod --name aagasa-worker --restart=always \
+            --env-file "$WORKER_ENV" -e HOME=/home/aagasa \
+            -v "$DATA/worker-state:/var/lib/aagasa/state:Z" \
+            -v "$DATA/recordings:/var/lib/aagasa/recordings:Z" \
+            "${devices[@]}" localhost/aagasa-worker:latest
+    fi
+
+    if [[ "$target" == both && -z "$FROM_SYSTEMD" ]]; then
+        enable_boot
+    fi
 
     say "Running"
-    note "Web UI and API: http://$publish:8080"
+    if [[ "$target" != worker ]]; then
+        note "Web UI and API: http://$publish:8080"
+    fi
     note "Data:           $DATA"
-    note "Logs:           podman logs -f aagasa-server   (or aagasa-worker)"
+    if [[ "$target" == server || "$target" == both ]]; then
+        note "Logs:           podman logs -f aagasa-server   (or aagasa-worker)"
+    else
+        note "Logs:           podman logs -f aagasa-worker"
+    fi
 }
 
 # ------------------------------------------------------------------- boot
@@ -372,8 +454,8 @@ Type=oneshot
 RemainAfterExit=yes
 Environment=AAGASA_FROM_SYSTEMD=1
 Environment=PATH=$PATH
-ExecStart=$ROOT/deploy.sh up
-ExecStop=$ROOT/deploy.sh down
+ExecStart=$ROOT/deploy.sh both up
+ExecStop=$ROOT/deploy.sh both down
 TimeoutStartSec=900
 
 [Install]
@@ -398,45 +480,106 @@ disable_boot() {
     note "no longer starts at boot"
 }
 
-stop() {
+stop_for() {  # stop_for <server|worker|both>
+    local target="$1" pod in_use=false
+    local pods=()
     command -v podman >/dev/null || die "podman is required"
-    local pod
-    for pod in "${PODS[@]}"; do
+    case "$target" in
+        server) pods=("${PODS_SERVER[@]}") ;;
+        worker) pods=("${PODS_WORKER[@]}") ;;
+        both)   pods=("${PODS_BOTH[@]}") ;;
+    esac
+    for pod in "${pods[@]}"; do
         podman pod exists "$pod" && podman pod rm -f "$pod" >/dev/null
     done
-    podman network exists "$NETWORK" && podman network rm "$NETWORK" >/dev/null 2>&1
+    # Keep the network while any other part of the station is still running.
+    for pod in "${PODS_BOTH[@]}"; do
+        if podman pod exists "$pod"; then
+            in_use=true
+            break
+        fi
+    done
+    if [[ "$in_use" == false ]] && podman network exists "$NETWORK"; then
+        podman network rm "$NETWORK" >/dev/null 2>&1 || true
+    fi
     note "stopped; data kept in $DATA"
 }
 
-reset() {
-    if [[ "${1:-}" != "--yes" ]]; then
-        [[ -t 0 ]] || die "reset deletes the database; run './deploy.sh reset --yes' to confirm"
-        printf 'This deletes the database, all accounts, the station setup and the\n'
-        printf "worker's state in %s (recordings are kept).\n" "$DATA"
+reset_for() {  # reset_for <server|worker|both> [--yes]
+    local target="$1" yes="${2:-}"
+    local paths=()
+    case "$target" in
+        server) paths=("$DATA/postgres" "$DATA/mongo") ;;
+        worker) paths=("$DATA/worker-state") ;;
+        both)   paths=("$DATA/postgres" "$DATA/mongo" "$DATA/worker-state") ;;
+    esac
+
+    if [[ "$yes" != "--yes" ]]; then
+        [[ -t 0 ]] || die "reset deletes state; run './deploy.sh $target reset --yes' to confirm"
+        case "$target" in
+            server)
+                printf 'This deletes the database, all accounts and the station setup.\n' ;;
+            worker)
+                printf "This deletes the worker's state in %s.\n" "$DATA/worker-state" ;;
+            both)
+                printf 'This deletes the database, all accounts, the station setup and the\n'
+                printf "worker's state in %s.\n" "$DATA" ;;
+        esac
+        printf 'Recordings are kept.\n'
         local answer
         read -r -p "Type 'reset' to continue: " answer
         [[ "$answer" == "reset" ]] || die "cancelled"
     fi
+
     say "Stopping"
-    stop
-    say "Deleting the database and station state"
+    stop_for "$target"
+    say "Deleting the $target state"
     # Database files belong to container users, so delete them inside the
     # user namespace that owns them.
-    podman unshare rm -rf "$DATA/postgres" "$DATA/mongo" "$DATA/worker-state" \
-        || die "could not delete $DATA"
+    podman unshare rm -rf "${paths[@]}" || die "could not delete ${paths[*]}"
     note "deleted"
-    build
-    start
+    build_for "$target"
+    start_for "$target"
 }
 
-case "${1:-}" in
-    up)      start ;;
-    down)    say "Stopping"; stop; [[ -n "$FROM_SYSTEMD" ]] || disable_boot ;;
-    restart) say "Stopping"; stop; start ;;
-    rebuild) build; say "Stopping"; stop; start ;;
-    reset)   reset "${2:-}" ;;
-    *)
-        sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//'
-        [[ -z "${1:-}" || "$1" == "help" || "$1" == "-h" || "$1" == "--help" ]] || exit 1
+# ------------------------------------------------------------------ entry
+
+TARGET="${1:-}"
+ACTION="${2:-}"
+EXTRA="${3:-}"
+
+if [[ $# -eq 0 || "$TARGET" == "help" || "$TARGET" == "-h" || "$TARGET" == "--help" ]]; then
+    usage
+    [[ $# -gt 0 ]] || exit 1
+    exit 0
+fi
+[[ $# -ge 2 ]] || { printf 'deploy: expected <server|worker|both> <subcommand>\n' >&2; usage >&2; exit 1; }
+[[ $# -le 3 ]] || die "too many arguments"
+
+case "$TARGET" in
+    server|worker|both) ;;
+    *) printf 'deploy: unknown target: %s\n' "$TARGET" >&2; usage >&2; exit 1 ;;
+esac
+case "$ACTION" in
+    up|down|restart|rebuild|reset) ;;
+    *) printf 'deploy: unknown subcommand: %s\n' "$ACTION" >&2; usage >&2; exit 1 ;;
+esac
+if [[ "$ACTION" == reset ]]; then
+    [[ -z "$EXTRA" || "$EXTRA" == "--yes" ]] || die "reset only accepts --yes"
+else
+    [[ -z "$EXTRA" ]] || die "unexpected argument: $EXTRA"
+fi
+
+case "$ACTION" in
+    up)      start_for "$TARGET" ;;
+    down)
+        say "Stopping"
+        stop_for "$TARGET"
+        if [[ "$TARGET" == both && -z "$FROM_SYSTEMD" ]]; then
+            disable_boot
+        fi
         ;;
+    restart) say "Stopping"; stop_for "$TARGET"; start_for "$TARGET" ;;
+    rebuild) build_for "$TARGET"; say "Stopping"; stop_for "$TARGET"; start_for "$TARGET" ;;
+    reset)   reset_for "$TARGET" "$EXTRA" ;;
 esac

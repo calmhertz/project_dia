@@ -3,6 +3,10 @@
 
 satdump.deb
 data/*
+build/*
+server/web/*
+deploy/server/web/*
+
 ### Dart ###
 # See https://www.dartlang.org/guides/libraries/private-files
 
