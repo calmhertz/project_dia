@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package aagasa.prediction.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "aagasa/internal/gen/prediction/v1;predictionv1";
+
+service PredictionService {
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  rpc PredictPasses(PredictPassesRequest) returns (PredictPassesResponse);
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  Status status = 1;
+  string version = 2;
+
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_SERVING = 1;
+    STATUS_NOT_SERVING = 2;
+  }
+}
+
+message TwoLineElements {
+  string line1 = 1;
+  string line2 = 2;
+}
+
+message ObserverLocation {
+  double latitude_degrees = 1;
+  double longitude_degrees = 2;
+  double altitude_m = 3;
+}
+
+message PredictPassesRequest {
+  TwoLineElements tle = 1;
+  ObserverLocation observer = 2;
+
+  double minimum_elevation_degrees = 3;
+
+  google.protobuf.Timestamp search_start = 4;
+  google.protobuf.Timestamp search_end = 5;
+
+  uint32 track_step_seconds = 6;
+
+  uint32 max_passes = 7;
+}
+
+message TrackPoint {
+  google.protobuf.Timestamp at = 1;
+  double azimuth_degrees = 2;
+  double elevation_degrees = 3;
+  double range_km = 4;
+}
+
+message PredictedPass {
+  google.protobuf.Timestamp aos = 1;
+  google.protobuf.Timestamp tca = 2;
+  google.protobuf.Timestamp los = 3;
+
+  double aos_azimuth_degrees = 4;
+  double tca_azimuth_degrees = 5;
+  double los_azimuth_degrees = 6;
+
+  double max_elevation_degrees = 7;
+  double duration_seconds = 8;
+
+  repeated TrackPoint track = 9;
+}
+
+message PredictPassesResponse {
+  int32 norad_id = 1;
+  repeated PredictedPass passes = 2;
+}

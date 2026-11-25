@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package aagasa.worker.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "aagasa/internal/gen/worker/v1;workerv1";
+
+enum RFBand {
+  RF_BAND_UNSPECIFIED = 0;
+  RF_BAND_VHF = 1;
+  RF_BAND_UHF = 2;
+}
+
+enum RecordingMode {
+  RECORDING_MODE_UNSPECIFIED = 0;
+  RECORDING_MODE_RAW = 1;
+  RECORDING_MODE_PROCESS = 2;
+  RECORDING_MODE_RAW_AND_PROCESS = 3;
+}
+
+message OrbitalElements {
+  string line1 = 1;
+  string line2 = 2;
+  google.protobuf.Timestamp epoch = 3;
+  string tle_record_id = 4;
+}
+
+message RadioSettings {
+  string source = 1;
+  int64 frequency_hz = 2;
+  int64 sample_rate_hz = 3;
+  double gain_db = 4;
+  int32 ppm_correction = 5;
+  bool bias_tee_enabled = 6;
+}
+
+message SatDumpPipeline {
+  string identifier = 1;
+  bool is_custom = 2;
+  string definition_json = 3;
+  string checksum_sha256 = 4;
+}
+
+message TrackPoint {
+  google.protobuf.Timestamp at = 1;
+  double azimuth_degrees = 2;
+  double elevation_degrees = 3;
+  double range_km = 4;
+}
+
+message PassPlan {
+  uint32 plan_version = 1;
+
+  string pass_id = 2;
+  string station_id = 3;
+  string worker_id = 4;
+
+  int32 norad_id = 5;
+  string satellite_name = 6;
+
+  OrbitalElements elements = 7;
+
+  google.protobuf.Timestamp aos = 8;
+  google.protobuf.Timestamp tca = 9;
+  google.protobuf.Timestamp los = 10;
+  double max_elevation_degrees = 11;
+
+  google.protobuf.Timestamp recording_start = 12;
+  google.protobuf.Timestamp recording_end = 13;
+
+  RFBand band = 14;
+  RadioSettings radio = 15;
+  RecordingMode recording_mode = 16;
+  SatDumpPipeline pipeline = 17;
+
+  repeated TrackPoint track = 18;
+
+  string generation = 19;
+  google.protobuf.Timestamp generated_at = 20;
+}
+
+message PassPlanSet {
+  repeated PassPlan plans = 1;
+  string generation = 2;
+  google.protobuf.Timestamp generated_at = 3;
+}

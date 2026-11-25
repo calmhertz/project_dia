@@ -1,0 +1,220 @@
+package main
+
+import (
+	"context"
+	"crypto/tls"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+
+	"aagasa/internal/auth"
+	"aagasa/internal/catalog"
+	"aagasa/internal/config"
+	"aagasa/internal/filestore"
+	workerv1 "aagasa/internal/gen/worker/v1"
+	"aagasa/internal/httpapi"
+	"aagasa/internal/livenotify"
+	"aagasa/internal/logging"
+	"aagasa/internal/passplan"
+	"aagasa/internal/prediction"
+	"aagasa/internal/scheduling"
+	"aagasa/internal/store"
+	"aagasa/internal/tle"
+	"aagasa/internal/workerapi"
+)
+
+const Version = "0.1.0"
+
+const shutdownTimeout = 15 * time.Second
+
+func main() {
+	if err := run(); err != nil {
+		slog.New(slog.NewJSONHandler(os.Stderr, nil)).Error("server failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	logger := logging.New(cfg.LogLevel)
+	logger.Info("starting server",
+		slog.String("version", Version),
+		slog.String("environment", cfg.Environment),
+	)
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	startupCtx, cancelStartup := context.WithTimeout(ctx, cfg.StartupTimeout)
+	defer cancelStartup()
+
+	stores, err := store.Open(startupCtx, cfg)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		stores.Close(closeCtx)
+	}()
+	logger.Info("datastores connected")
+
+	files, err := filestore.New(cfg.RecordingsDir, cfg.PipelinesDir)
+	if err != nil {
+		return err
+	}
+	logger.Info("file storage ready")
+
+	repository := store.NewRepository(stores.Postgres)
+	sessions := store.NewSessionStore(stores.Redis)
+	authService := auth.NewService(repository, sessions, logger, cfg.SessionTTL)
+
+	if err := authService.EnsureBootstrapRoot(startupCtx); err != nil {
+		return err
+	}
+
+	satnogs := tle.NewSatNOGS(cfg.SatNOGSURL, 0)
+	providers := tle.NewChain(logger, tle.NewCelestrak(cfg.CelestrakURL, 0), satnogs)
+	catalogService := catalog.NewService(repository, providers, satnogs, logger)
+
+	predictionClient, err := prediction.Dial(cfg.PredictionAddress)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = predictionClient.Close() }()
+
+	if err := predictionClient.Health(startupCtx); err != nil {
+		logger.Warn("prediction service not reachable at startup", slog.String("error", err.Error()))
+	} else {
+		logger.Info("prediction service reachable")
+	}
+
+	planGenerator := passplan.NewGenerator(repository, predictionClient)
+	schedulingService := scheduling.NewService(repository, predictionClient, planGenerator, logger)
+
+	corsOptions := httpapi.CORSOptions{
+		AllowedOrigins: cfg.AllowedOrigins,
+		AllowLocalhost: cfg.AllowLocalhostOrigins(),
+	}
+
+	liveNotifications := livenotify.New()
+	go liveNotifications.Listen(ctx, stores.Postgres, logger)
+
+	apiHandler := httpapi.NewMux(logger, Version, httpapi.Dependencies{
+		Files:      files,
+		Stores:     stores,
+		Repository: repository,
+		Auth:       authService,
+		Catalog:    catalogService,
+		Scheduling: schedulingService,
+		Prediction: predictionClient,
+		WebDir:     cfg.WebDir,
+
+		LoginAttempts:     store.NewLoginAttempts(stores.Redis, store.DefaultLoginAttemptPrefix),
+		LiveNotifications: liveNotifications,
+		WebSocketOrigins:  httpapi.OriginPatterns(corsOptions),
+	})
+	if corsOptions.Enabled() {
+		logger.Info("browser origins allowed",
+			slog.Int("configured", len(cfg.AllowedOrigins)),
+			slog.Bool("localhost", corsOptions.AllowLocalhost))
+	}
+
+	httpServer := &http.Server{
+		Addr:              cfg.HTTPAddress,
+		Handler:           httpapi.WithCORS(apiHandler, corsOptions),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	grpcOptions := []grpc.ServerOption{
+		grpc.UnaryInterceptor(workerapi.SharedSecretInterceptor(cfg.WorkerSharedSecret)),
+		grpc.StreamInterceptor(workerapi.SharedSecretStreamInterceptor(cfg.WorkerSharedSecret)),
+	}
+	if cfg.TLSEnabled() {
+		certificate, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
+		if err != nil {
+			return fmt.Errorf("load TLS material: %w", err)
+		}
+		settings := &tls.Config{
+			Certificates: []tls.Certificate{certificate},
+			MinVersion:   tls.VersionTLS12,
+		}
+		httpServer.TLSConfig = settings
+		grpcOptions = append(grpcOptions, grpc.Creds(credentials.NewTLS(settings)))
+		logger.Info("tls enabled for http and grpc")
+	} else if cfg.Environment == "production" {
+		logger.Warn("tls is not configured; the worker credential will cross the network in clear " +
+			"unless something in front terminates TLS")
+	}
+
+	grpcServer := grpc.NewServer(grpcOptions...)
+	workerService := workerapi.NewService(repository, files, logger, Version).
+		WithExecutionLog(store.NewExecutionLog(stores.Database()))
+	workerv1.RegisterWorkerServiceServer(grpcServer, workerService)
+
+	grpcListener, err := net.Listen("tcp", cfg.GRPCAddress)
+	if err != nil {
+		return err
+	}
+
+	go workerapi.RunStaleWorkerMonitor(ctx, repository, logger)
+	go workerapi.RunMissedPassSweeper(ctx, repository, logger)
+
+	if cfg.TLERefreshEnabled {
+		go catalogService.RunRefreshLoop(ctx)
+	} else {
+		logger.Warn("background tle refresh is disabled")
+	}
+
+	errs := make(chan error, 2)
+
+	go func() {
+		logger.Info("http listening",
+			slog.String("address", cfg.HTTPAddress), slog.Bool("tls", cfg.TLSEnabled()))
+		serve := httpServer.ListenAndServe
+		if cfg.TLSEnabled() {
+			serve = func() error { return httpServer.ListenAndServeTLS("", "") }
+		}
+		if err := serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errs <- err
+		}
+	}()
+
+	go func() {
+		logger.Info("grpc listening",
+			slog.String("address", cfg.GRPCAddress), slog.Bool("tls", cfg.TLSEnabled()))
+		if err := grpcServer.Serve(grpcListener); err != nil {
+			errs <- err
+		}
+	}()
+
+	select {
+	case err := <-errs:
+		return err
+	case <-ctx.Done():
+		logger.Info("shutdown requested")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
+	grpcServer.GracefulStop()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error("http shutdown failed", slog.String("error", err.Error()))
+	}
+	logger.Info("stopped")
+	return nil
+}

@@ -1,0 +1,830 @@
+package scheduling_test
+
+import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"aagasa/internal/domain"
+	"aagasa/internal/prediction"
+	"aagasa/internal/scheduling"
+	"aagasa/internal/store"
+	"aagasa/internal/testsupport"
+)
+
+const argon2idHash = "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHR2YWx1ZQ$aGFzaHZhbHVlaGFzaHZhbHVlaGFzaHZhbA"
+
+const (
+	issLine1 = "1 25544U 98067A   26236.17729445  .00008773  00000+0  16369-3 0  9990"
+	issLine2 = "2 25544  51.6333 323.5788 0007697  77.8713 282.3138 15.49600847582298"
+)
+
+func discardLogger() *slog.Logger { return slog.New(slog.NewJSONHandler(io.Discard, nil)) }
+
+type fakePredictor struct {
+	mu     sync.Mutex
+	passes []prediction.Pass
+	err    error
+	calls  int
+}
+
+func (f *fakePredictor) PredictPasses(ctx context.Context, request prediction.Request) (prediction.Result, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if f.err != nil {
+		return prediction.Result{}, f.err
+	}
+	var inWindow []prediction.Pass
+	for _, candidate := range f.passes {
+		if !candidate.AOS.Before(request.SearchStart) && !candidate.AOS.After(request.SearchEnd) {
+			inWindow = append(inWindow, candidate)
+		}
+	}
+	return prediction.Result{NoradID: 25544, Passes: inWindow}, nil
+}
+
+func passAt(aos time.Time, duration time.Duration) prediction.Pass {
+	return prediction.Pass{
+		AOS: aos, TCA: aos.Add(duration / 2), LOS: aos.Add(duration),
+		AOSAzimuthDegrees: 190, TCAAzimuthDegrees: 130, LOSAzimuthDegrees: 60,
+		MaxElevationDegrees: 31, Duration: duration,
+	}
+}
+
+type world struct {
+	repo      *store.Repository
+	service   *scheduling.Service
+	predictor *fakePredictor
+
+	station   domain.Station
+	satellite domain.Satellite
+	worker    domain.Worker
+	config    domain.SchedulingConfig
+
+	user  domain.User
+	other domain.User
+	admin domain.User
+	root  domain.User
+}
+
+func newWorld(t *testing.T, leadTime time.Duration) *world {
+	t.Helper()
+	ctx := context.Background()
+
+	url := testsupport.NewDatabase(t)
+	if err := store.MigrateUp(ctx, url); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatalf("open pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	repo := store.NewRepository(pool)
+	predictor := &fakePredictor{}
+	service := scheduling.NewService(repo, predictor, nil, discardLogger())
+
+	w := &world{repo: repo, service: service, predictor: predictor}
+
+	w.user = mustUser(t, repo, "requester", domain.RoleUser)
+	w.other = mustUser(t, repo, "other", domain.RoleUser)
+	w.admin = mustUser(t, repo, "approver", domain.RoleAdmin)
+	w.root = mustUser(t, repo, "root", domain.RoleRoot)
+
+	w.station, err = repo.CreateStation(ctx, domain.Station{
+		Name: "SJCIT", Latitude: 13.394944, Longitude: 77.729444,
+		AltitudeM: 915, Timezone: "UTC", ActiveRFBand: domain.BandVHF,
+	})
+	if err != nil {
+		t.Fatalf("create station: %v", err)
+	}
+
+	w.config, err = repo.CreateSchedulingConfig(ctx, domain.SchedulingConfig{
+		StationID: w.station.ID, MinimumLeadTime: leadTime,
+		PrePassBuffer: 2 * time.Minute, PostPassBuffer: 2 * time.Minute,
+		RecordingPreRoll: 10 * time.Second, RecordingPostRoll: 10 * time.Second,
+		MinimumElevationDegrees: 10,
+		EffectiveFrom:           time.Now().UTC().Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("create scheduling config: %v", err)
+	}
+
+	w.satellite, err = repo.CreateSatellite(ctx, domain.Satellite{
+		NoradID: 25544, Name: "ISS (ZARYA)", IsSchedulable: true,
+	})
+	if err != nil {
+		t.Fatalf("create satellite: %v", err)
+	}
+	if _, err := repo.CreateTLERecord(ctx, domain.TLERecord{
+		SatelliteID: w.satellite.ID, Line1: issLine1, Line2: issLine2,
+		Epoch: time.Now().UTC().Add(-6 * time.Hour), Source: domain.SourceCelestrak,
+	}); err != nil {
+		t.Fatalf("create tle: %v", err)
+	}
+
+	w.worker, err = repo.CreateWorker(ctx, domain.Worker{
+		StationID: w.station.ID, Name: "worker-1", ConnectionState: domain.WorkerOnline,
+	})
+	if err != nil {
+		t.Fatalf("create worker: %v", err)
+	}
+
+	return w
+}
+
+func mustUser(t *testing.T, repo *store.Repository, username string, role domain.UserRole) domain.User {
+	t.Helper()
+	user, err := repo.CreateUser(context.Background(), domain.User{
+		Username: username, PasswordHash: argon2idHash, Role: role,
+	})
+	if err != nil {
+		t.Fatalf("create %s: %v", username, err)
+	}
+	return user
+}
+
+func (w *world) request(actor domain.User, aos time.Time) scheduling.RequestInput {
+	return scheduling.RequestInput{
+		SatelliteID: w.satellite.ID, RequestedAOS: aos,
+		Band: domain.BandVHF, RecordingMode: domain.RecordRaw,
+		Visibility: domain.VisibilityPrivate,
+	}
+}
+
+func TestRequestPassCreatesAPendingPass(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	aos := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
+	w.predictor.passes = []prediction.Pass{passAt(aos, 10*time.Minute)}
+
+	result, err := w.service.RequestPass(ctx, w.user, w.request(w.user, aos))
+	if err != nil {
+		t.Fatalf("RequestPass: %v", err)
+	}
+
+	if result.Pass.Status != domain.PassPendingApproval {
+		t.Errorf("status = %s, want pending_approval", result.Pass.Status)
+	}
+	if result.Pass.RequestedBy != w.user.ID {
+		t.Error("pass is not attributed to the requester")
+	}
+	if !result.Pass.ReservedFrom.Equal(aos.Add(-2 * time.Minute)) {
+		t.Errorf("ReservedFrom = %s, want AOS minus 2m", result.Pass.ReservedFrom)
+	}
+	if !result.Pass.ReservedTo.Equal(aos.Add(12 * time.Minute)) {
+		t.Errorf("ReservedTo = %s, want LOS plus 2m", result.Pass.ReservedTo)
+	}
+	if result.Pass.RecordingPreRoll != 10*time.Second {
+		t.Errorf("RecordingPreRoll = %v, want 10s", result.Pass.RecordingPreRoll)
+	}
+}
+
+func TestClientSuppliedTimingIsNotTrusted(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	realAOS := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
+	w.predictor.passes = []prediction.Pass{passAt(realAOS, 10*time.Minute)}
+
+	result, err := w.service.RequestPass(ctx, w.user, w.request(w.user, realAOS.Add(30*time.Second)))
+	if err != nil {
+		t.Fatalf("RequestPass: %v", err)
+	}
+	if !result.Pass.AOSAt.Equal(realAOS) {
+		t.Errorf("AOS = %s, want the predicted %s", result.Pass.AOSAt, realAOS)
+	}
+}
+
+func TestRequestingAPassThatDoesNotExistIsRefused(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+	w.predictor.passes = []prediction.Pass{
+		passAt(time.Now().UTC().Add(4*time.Hour), 10*time.Minute),
+	}
+
+	_, err := w.service.RequestPass(ctx, w.user, w.request(w.user, time.Now().UTC().Add(10*time.Hour)))
+	if !errors.Is(err, scheduling.ErrPassNotFound) {
+		t.Errorf("error = %v, want ErrPassNotFound", err)
+	}
+}
+
+func TestUnschedulableSatelliteIsRefused(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+	if _, err := w.repo.UpdateSatellite(ctx, w.satellite.ID, "ISS", "", false); err != nil {
+		t.Fatalf("update satellite: %v", err)
+	}
+
+	aos := time.Now().UTC().Add(4 * time.Hour)
+	w.predictor.passes = []prediction.Pass{passAt(aos, 10*time.Minute)}
+
+	if _, err := w.service.RequestPass(ctx, w.user, w.request(w.user, aos)); !errors.Is(err, scheduling.ErrNotSchedulable) {
+		t.Errorf("error = %v, want ErrNotSchedulable", err)
+	}
+}
+
+func TestOverlappingRequestIsRejected(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	first := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
+	w.predictor.passes = []prediction.Pass{
+		passAt(first, 15*time.Minute),
+		passAt(first.Add(10*time.Minute), 10*time.Minute),
+	}
+
+	if _, err := w.service.RequestPass(ctx, w.user, w.request(w.user, first)); err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+
+	_, err := w.service.RequestPass(ctx, w.other, w.request(w.other, first.Add(10*time.Minute)))
+	if !errors.Is(err, scheduling.ErrStationConflict) {
+		t.Fatalf("error = %v, want ErrStationConflict", err)
+	}
+
+	var conflict *scheduling.ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("error is not a ConflictError: %v", err)
+	}
+	if conflict.OccupiedFrom.IsZero() || conflict.OccupiedTo.IsZero() {
+		t.Error("the conflict does not report the occupied window")
+	}
+}
+
+func TestConflictDoesNotLeakTheOtherUser(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	aos := time.Now().UTC().Add(4 * time.Hour)
+	w.predictor.passes = []prediction.Pass{passAt(aos, 15*time.Minute)}
+
+	if _, err := w.service.RequestPass(ctx, w.user, w.request(w.user, aos)); err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+	_, err := w.service.RequestPass(ctx, w.other, w.request(w.other, aos))
+	if err == nil {
+		t.Fatal("expected a conflict")
+	}
+
+	message := err.Error()
+	for _, secret := range []string{w.user.Username, w.user.ID.String()} {
+		if strings.Contains(message, secret) {
+			t.Errorf("conflict message leaks %q: %s", secret, message)
+		}
+	}
+}
+
+func TestNonOverlappingPassesAreBothAccepted(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	first := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
+	second := first.Add(40 * time.Minute)
+	w.predictor.passes = []prediction.Pass{
+		passAt(first, 10*time.Minute), passAt(second, 10*time.Minute),
+	}
+
+	if _, err := w.service.RequestPass(ctx, w.user, w.request(w.user, first)); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	if _, err := w.service.RequestPass(ctx, w.other, w.request(w.other, second)); err != nil {
+		t.Errorf("second, non-overlapping request rejected: %v", err)
+	}
+}
+
+func TestConcurrentRequestsCannotRaceThroughTheConflictCheck(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	aos := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
+	w.predictor.passes = []prediction.Pass{passAt(aos, 10*time.Minute)}
+
+	const attempts = 10
+	var waitGroup sync.WaitGroup
+	results := make(chan error, attempts)
+
+	for i := 0; i < attempts; i++ {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			_, err := w.service.RequestPass(ctx, w.user, w.request(w.user, aos))
+			results <- err
+		}()
+	}
+	waitGroup.Wait()
+	close(results)
+
+	accepted, conflicted := 0, 0
+	for err := range results {
+		switch {
+		case err == nil:
+			accepted++
+		case errors.Is(err, scheduling.ErrStationConflict):
+			conflicted++
+		default:
+			t.Errorf("unexpected error: %v", err)
+		}
+	}
+
+	if accepted != 1 {
+		t.Errorf("accepted = %d, want exactly 1", accepted)
+	}
+	if conflicted != attempts-1 {
+		t.Errorf("conflicted = %d, want %d", conflicted, attempts-1)
+	}
+}
+
+func TestLeadTimeBlocksAPassStartingTooSoon(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 2*time.Hour)
+
+	soon := time.Now().UTC().Add(30 * time.Minute)
+	w.predictor.passes = []prediction.Pass{passAt(soon, 10*time.Minute)}
+
+	if _, err := w.service.RequestPass(ctx, w.user, w.request(w.user, soon)); !errors.Is(err, scheduling.ErrLeadTime) {
+		t.Errorf("error = %v, want ErrLeadTime", err)
+	}
+}
+
+func TestRootCannotBypassTheLeadTime(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 2*time.Hour)
+
+	soon := time.Now().UTC().Add(30 * time.Minute)
+	w.predictor.passes = []prediction.Pass{passAt(soon, 10*time.Minute)}
+
+	if _, err := w.service.RequestPass(ctx, w.root, w.request(w.root, soon)); !errors.Is(err, scheduling.ErrLeadTime) {
+		t.Errorf("root plain request error = %v, want ErrLeadTime", err)
+	}
+	if _, err := w.service.RequestPassWithRootOverride(ctx, w.root, w.request(w.root, soon)); !errors.Is(err, scheduling.ErrLeadTime) {
+		t.Errorf("root override error = %v, want ErrLeadTime", err)
+	}
+}
+
+func TestShortenedLeadTimeIsNotUsableImmediately(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 4*time.Hour)
+
+	saved, err := w.service.UpdateSchedulingConfig(ctx, w.root, domain.SchedulingConfig{
+		MinimumLeadTime: 5 * time.Minute,
+		PrePassBuffer:   2 * time.Minute, PostPassBuffer: 2 * time.Minute,
+		RecordingPreRoll: 10 * time.Second, RecordingPostRoll: 10 * time.Second,
+		MinimumElevationDegrees: 10,
+	})
+	if err != nil {
+		t.Fatalf("UpdateSchedulingConfig: %v", err)
+	}
+	if !saved.EffectiveFrom.After(time.Now().UTC()) {
+		t.Error("the new configuration became effective immediately")
+	}
+
+	soon := time.Now().UTC().Add(30 * time.Minute)
+	w.predictor.passes = []prediction.Pass{passAt(soon, 10*time.Minute)}
+
+	if _, err := w.service.RequestPass(ctx, w.root, w.request(w.root, soon)); !errors.Is(err, scheduling.ErrLeadTime) {
+		t.Errorf("error = %v, want the old lead time still enforced", err)
+	}
+}
+
+func TestOnlyRootCanChangeSchedulingConfiguration(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, time.Hour)
+
+	for _, actor := range []domain.User{w.user, w.admin} {
+		_, err := w.service.UpdateSchedulingConfig(ctx, actor, domain.SchedulingConfig{
+			MinimumLeadTime: time.Hour, MinimumElevationDegrees: 10,
+		})
+		if !errors.Is(err, scheduling.ErrForbidden) {
+			t.Errorf("%s changing config: error = %v, want ErrForbidden", actor.Role, err)
+		}
+	}
+}
+
+func TestAdminApprovesAndRejects(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	aos := time.Now().UTC().Add(4 * time.Hour)
+	w.predictor.passes = []prediction.Pass{passAt(aos, 10*time.Minute)}
+	result, err := w.service.RequestPass(ctx, w.user, w.request(w.user, aos))
+	if err != nil {
+		t.Fatalf("RequestPass: %v", err)
+	}
+
+	approved, err := w.service.Approve(ctx, w.admin, result.Pass.ID)
+	if err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	if approved.Status != domain.PassApproved {
+		t.Errorf("status = %s, want approved", approved.Status)
+	}
+	if approved.ApprovedBy == nil || *approved.ApprovedBy != w.admin.ID {
+		t.Error("the approver is not recorded")
+	}
+
+	if _, err := w.service.Approve(ctx, w.admin, result.Pass.ID); err == nil {
+		t.Error("approving an approved pass must be refused")
+	}
+}
+
+func TestNormalUserCannotApprove(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	aos := time.Now().UTC().Add(4 * time.Hour)
+	w.predictor.passes = []prediction.Pass{passAt(aos, 10*time.Minute)}
+	result, err := w.service.RequestPass(ctx, w.user, w.request(w.user, aos))
+	if err != nil {
+		t.Fatalf("RequestPass: %v", err)
+	}
+
+	if _, err := w.service.Approve(ctx, w.user, result.Pass.ID); !errors.Is(err, scheduling.ErrForbidden) {
+		t.Errorf("error = %v, want ErrForbidden", err)
+	}
+}
+
+func TestRejectedPassReleasesTheStation(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	aos := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
+	w.predictor.passes = []prediction.Pass{passAt(aos, 10*time.Minute)}
+
+	first, err := w.service.RequestPass(ctx, w.user, w.request(w.user, aos))
+	if err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+	if _, err := w.service.Reject(ctx, w.admin, first.Pass.ID); err != nil {
+		t.Fatalf("Reject: %v", err)
+	}
+
+	if _, err := w.service.RequestPass(ctx, w.other, w.request(w.other, aos)); err != nil {
+		t.Errorf("slot not released after rejection: %v", err)
+	}
+}
+
+func TestOwnerCancelsAndSlotIsReleased(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	aos := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
+	w.predictor.passes = []prediction.Pass{passAt(aos, 10*time.Minute)}
+
+	result, err := w.service.RequestPass(ctx, w.user, w.request(w.user, aos))
+	if err != nil {
+		t.Fatalf("RequestPass: %v", err)
+	}
+
+	cancelled, err := w.service.Cancel(ctx, w.user, result.Pass.ID)
+	if err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	if cancelled.Status != domain.PassCancelled {
+		t.Errorf("status = %s, want cancelled", cancelled.Status)
+	}
+	if cancelled.CancellationReason == nil || *cancelled.CancellationReason != domain.CancelledByOwner {
+		t.Error("the cancellation reason is not recorded as owner")
+	}
+
+	if _, err := w.service.RequestPass(ctx, w.other, w.request(w.other, aos)); err != nil {
+		t.Errorf("slot not released after cancellation: %v", err)
+	}
+}
+
+func TestStrangerCannotCancelSomeoneElsesPass(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	aos := time.Now().UTC().Add(4 * time.Hour)
+	w.predictor.passes = []prediction.Pass{passAt(aos, 10*time.Minute)}
+	result, err := w.service.RequestPass(ctx, w.user, w.request(w.user, aos))
+	if err != nil {
+		t.Fatalf("RequestPass: %v", err)
+	}
+
+	if _, err := w.service.Cancel(ctx, w.other, result.Pass.ID); !errors.Is(err, scheduling.ErrForbidden) {
+		t.Errorf("error = %v, want ErrForbidden", err)
+	}
+}
+
+func TestRootOverrideCancelsTheConflictingPassAndKeepsItAuditable(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	aos := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
+	w.predictor.passes = []prediction.Pass{passAt(aos, 10*time.Minute)}
+
+	victim, err := w.service.RequestPass(ctx, w.user, w.request(w.user, aos))
+	if err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+	if _, err := w.service.Approve(ctx, w.admin, victim.Pass.ID); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+
+	result, err := w.service.RequestPassWithRootOverride(ctx, w.root, w.request(w.root, aos))
+	if err != nil {
+		t.Fatalf("RequestPassWithRootOverride: %v", err)
+	}
+
+	if result.Pass.Status != domain.PassApproved {
+		t.Errorf("root pass status = %s, want approved", result.Pass.Status)
+	}
+	if len(result.OverriddenPassIDs) != 1 || result.OverriddenPassIDs[0] != victim.Pass.ID {
+		t.Errorf("overridden = %v, want the first pass", result.OverriddenPassIDs)
+	}
+
+	displaced, err := w.repo.GetPassByID(ctx, victim.Pass.ID)
+	if err != nil {
+		t.Fatalf("the overridden pass was deleted: %v", err)
+	}
+	if displaced.Status != domain.PassCancelled {
+		t.Errorf("displaced status = %s, want cancelled", displaced.Status)
+	}
+	if displaced.CancellationReason == nil ||
+		*displaced.CancellationReason != domain.CancelledByRootOverride {
+		t.Errorf("displaced reason = %v, want cancelled_by_root_override", displaced.CancellationReason)
+	}
+
+	count, err := w.repo.CountAuditRecords(ctx, "pass", victim.Pass.ID.String())
+	if err != nil {
+		t.Fatalf("CountAuditRecords: %v", err)
+	}
+	if count < 2 {
+		t.Errorf("audit records = %d, want the request and the override", count)
+	}
+}
+
+func TestOnlyRootCanOverride(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	aos := time.Now().UTC().Add(4 * time.Hour)
+	w.predictor.passes = []prediction.Pass{passAt(aos, 10*time.Minute)}
+
+	for _, actor := range []domain.User{w.user, w.admin} {
+		if _, err := w.service.RequestPassWithRootOverride(ctx, actor, w.request(actor, aos)); !errors.Is(err, scheduling.ErrForbidden) {
+			t.Errorf("%s override: error = %v, want ErrForbidden", actor.Role, err)
+		}
+	}
+}
+
+func TestRootOverrideWithNoConflictJustSchedules(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	aos := time.Now().UTC().Add(4 * time.Hour)
+	w.predictor.passes = []prediction.Pass{passAt(aos, 10*time.Minute)}
+
+	result, err := w.service.RequestPassWithRootOverride(ctx, w.root, w.request(w.root, aos))
+	if err != nil {
+		t.Fatalf("RequestPassWithRootOverride: %v", err)
+	}
+	if len(result.OverriddenPassIDs) != 0 {
+		t.Errorf("overridden = %v, want none", result.OverriddenPassIDs)
+	}
+}
+
+func TestOfflineWorkerBlocksNewScheduling(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	if err := w.repo.SetWorkerConnectionState(ctx, w.worker.ID, domain.WorkerOffline, nil); err != nil {
+		t.Fatalf("set worker offline: %v", err)
+	}
+
+	aos := time.Now().UTC().Add(4 * time.Hour)
+	w.predictor.passes = []prediction.Pass{passAt(aos, 10*time.Minute)}
+
+	if _, err := w.service.RequestPass(ctx, w.user, w.request(w.user, aos)); !errors.Is(err, scheduling.ErrWorkerOffline) {
+		t.Errorf("error = %v, want ErrWorkerOffline", err)
+	}
+	if _, err := w.service.RequestPassWithRootOverride(ctx, w.root, w.request(w.root, aos)); !errors.Is(err, scheduling.ErrWorkerOffline) {
+		t.Errorf("root override error = %v, want ErrWorkerOffline", err)
+	}
+}
+
+func TestChangingTheStationBandDoesNotDisturbApprovedPasses(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	aos := time.Now().UTC().Add(4 * time.Hour)
+	w.predictor.passes = []prediction.Pass{passAt(aos, 10*time.Minute)}
+	result, err := w.service.RequestPass(ctx, w.user, w.request(w.user, aos))
+	if err != nil {
+		t.Fatalf("RequestPass: %v", err)
+	}
+	if _, err := w.service.Approve(ctx, w.admin, result.Pass.ID); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+
+	if err := w.repo.SetStationActiveBand(ctx, w.station.ID, domain.BandUHF); err != nil {
+		t.Fatalf("SetStationActiveBand: %v", err)
+	}
+
+	after, err := w.repo.GetPassByID(ctx, result.Pass.ID)
+	if err != nil {
+		t.Fatalf("GetPassByID: %v", err)
+	}
+	if after.Status != domain.PassApproved {
+		t.Errorf("status = %s, want the pass untouched at approved", after.Status)
+	}
+	if after.Band != domain.BandVHF {
+		t.Errorf("band = %s, want the pass to keep its own band", after.Band)
+	}
+}
+
+func TestBandMismatchWarnsButStillSchedules(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	aos := time.Now().UTC().Add(4 * time.Hour)
+	w.predictor.passes = []prediction.Pass{passAt(aos, 10*time.Minute)}
+
+	input := w.request(w.user, aos)
+	input.Band = domain.BandUHF
+
+	result, err := w.service.RequestPass(ctx, w.user, input)
+	if err != nil {
+		t.Fatalf("a band mismatch must not block scheduling: %v", err)
+	}
+	if len(result.Warnings) != 1 || result.Warnings[0].Code != "band_mismatch" {
+		t.Errorf("warnings = %+v, want one band_mismatch", result.Warnings)
+	}
+	if result.Pass.Status != domain.PassPendingApproval {
+		t.Errorf("status = %s, want the pass accepted", result.Pass.Status)
+	}
+}
+
+func TestPredictionOutageDoesNotCreateAPass(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+	w.predictor.err = errors.New("prediction service unavailable")
+
+	aos := time.Now().UTC().Add(4 * time.Hour)
+	if _, err := w.service.RequestPass(ctx, w.user, w.request(w.user, aos)); err == nil {
+		t.Fatal("expected an error when prediction is down")
+	}
+
+	passes, err := w.repo.ListPasses(ctx, store.PassFilter{})
+	if err != nil {
+		t.Fatalf("ListPasses: %v", err)
+	}
+	if len(passes) != 0 {
+		t.Errorf("passes = %d, want none created during an outage", len(passes))
+	}
+}
+
+func TestListPassesFiltersByOwnerAndStatus(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	first := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
+	second := first.Add(40 * time.Minute)
+	w.predictor.passes = []prediction.Pass{
+		passAt(first, 10*time.Minute), passAt(second, 10*time.Minute),
+	}
+
+	mine, err := w.service.RequestPass(ctx, w.user, w.request(w.user, first))
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	if _, err := w.service.RequestPass(ctx, w.other, w.request(w.other, second)); err != nil {
+		t.Fatalf("second: %v", err)
+	}
+
+	owned, err := w.repo.ListPasses(ctx, store.PassFilter{RequestedBy: &w.user.ID})
+	if err != nil {
+		t.Fatalf("ListPasses: %v", err)
+	}
+	if len(owned) != 1 || owned[0].ID != mine.Pass.ID {
+		t.Errorf("owner filter returned %d passes", len(owned))
+	}
+
+	pending, err := w.repo.ListPasses(ctx, store.PassFilter{
+		Statuses: []domain.PassStatus{domain.PassPendingApproval},
+	})
+	if err != nil {
+		t.Fatalf("ListPasses: %v", err)
+	}
+	if len(pending) != 2 {
+		t.Errorf("pending = %d, want 2", len(pending))
+	}
+}
+
+func (w *world) rejectedPass(t *testing.T, aos time.Time) domain.Pass {
+	t.Helper()
+	ctx := context.Background()
+	w.predictor.passes = append(w.predictor.passes, passAt(aos, 10*time.Minute))
+	result, err := w.service.RequestPass(ctx, w.user, w.request(w.user, aos))
+	if err != nil {
+		t.Fatalf("RequestPass: %v", err)
+	}
+	if _, err := w.service.Reject(ctx, w.admin, result.Pass.ID); err != nil {
+		t.Fatalf("Reject: %v", err)
+	}
+	return result.Pass
+}
+
+func TestOnlyRootCanOverruleARejection(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+	pass := w.rejectedPass(t, time.Now().UTC().Add(4*time.Hour).Truncate(time.Second))
+
+	if _, err := w.service.Approve(ctx, w.admin, pass.ID); !errors.Is(err, scheduling.ErrForbidden) {
+		t.Fatalf("admin overrule: error = %v, want ErrForbidden", err)
+	}
+	if _, err := w.service.Approve(ctx, w.user, pass.ID); !errors.Is(err, scheduling.ErrForbidden) {
+		t.Fatalf("user overrule: error = %v, want ErrForbidden", err)
+	}
+
+	approved, err := w.service.Approve(ctx, w.root, pass.ID)
+	if err != nil {
+		t.Fatalf("root overrule: %v", err)
+	}
+	if approved.Status != domain.PassApproved {
+		t.Errorf("status = %s, want approved", approved.Status)
+	}
+	if approved.ApprovedBy == nil || *approved.ApprovedBy != w.root.ID {
+		t.Error("root is not recorded as the approver")
+	}
+
+	records, err := w.repo.ListAuditRecords(ctx, store.AuditFilter{
+		EntityType: "pass", EntityID: pass.ID.String(), Limit: 20})
+	if err != nil {
+		t.Fatalf("list audit: %v", err)
+	}
+	found := false
+	for _, record := range records {
+		if record.Action == "pass.rejection_overruled" {
+			found = true
+			if record.ActorUserID == nil || *record.ActorUserID != w.root.ID {
+				t.Error("the overrule is not attributed to root")
+			}
+		}
+	}
+	if !found {
+		t.Error("the overrule was not audited")
+	}
+}
+
+func TestOverrulingARejectionStillRespectsConflicts(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+	aos := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
+	pass := w.rejectedPass(t, aos)
+
+	if _, err := w.service.RequestPass(ctx, w.other, w.request(w.other, aos)); err != nil {
+		t.Fatalf("second request: %v", err)
+	}
+
+	_, err := w.service.Approve(ctx, w.root, pass.ID)
+	if !errors.Is(err, scheduling.ErrStationConflict) {
+		t.Fatalf("error = %v, want a station conflict", err)
+	}
+	stored, err := w.repo.GetPassByID(ctx, pass.ID)
+	if err != nil {
+		t.Fatalf("GetPassByID: %v", err)
+	}
+	if stored.Status != domain.PassRejected {
+		t.Errorf("status = %s, want rejected", stored.Status)
+	}
+}
+
+func TestARejectionCannotBeOverruledAfterItsWindow(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld(t, 30*time.Minute)
+
+	tle, err := w.repo.LatestTLERecord(ctx, w.satellite.ID)
+	if err != nil {
+		t.Fatalf("LatestTLERecord: %v", err)
+	}
+	aos := time.Now().UTC().Add(-time.Hour)
+	pass, err := w.repo.CreatePass(ctx, domain.Pass{
+		StationID: w.station.ID, SatelliteID: w.satellite.ID, RequestedBy: w.user.ID,
+		TLERecordID: tle.ID, SchedulingConfigID: w.config.ID,
+		Status: domain.PassRejected, Visibility: domain.VisibilityPrivate,
+		Band: domain.BandVHF, AOSAt: aos, LOSAt: aos.Add(10 * time.Minute),
+		MaxElevationDegrees: 31,
+		ReservedFrom:        aos.Add(-2 * time.Minute), ReservedTo: aos.Add(12 * time.Minute),
+		RecordingMode: domain.RecordRaw,
+	})
+	if err != nil {
+		t.Fatalf("CreatePass: %v", err)
+	}
+
+	if _, err := w.service.Approve(ctx, w.root, pass.ID); !errors.Is(err, scheduling.ErrWindowPassed) {
+		t.Errorf("error = %v, want ErrWindowPassed", err)
+	}
+}

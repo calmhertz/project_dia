@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package aagasa.worker.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "aagasa/internal/gen/worker/v1;workerv1";
+
+message RecordingMetadata {
+  string recording_id = 1;
+
+  string pass_id = 2;
+  string worker_id = 3;
+  string station_id = 4;
+
+  string relative_path = 5;
+
+  uint64 size_bytes = 6;
+  string checksum_sha256 = 7;
+
+  google.protobuf.Timestamp started_at = 8;
+  google.protobuf.Timestamp finished_at = 9;
+}
+
+message UploadRecordingRequest {
+  oneof payload {
+    RecordingMetadata metadata = 1;
+    bytes chunk = 2;
+  }
+}
+
+message UploadRecordingResponse {
+  string recording_id = 1;
+  bool stored = 2;
+  uint64 size_bytes = 3;
+}
+
+message ExecutionRecord {
+  string pass_id = 1;
+  string state = 2;
+  string detail = 3;
+  google.protobuf.Timestamp recorded_at = 4;
+}
+
+message ReportExecutionsRequest {
+  string worker_id = 1;
+  repeated ExecutionRecord records = 2;
+}
+
+message ReportExecutionsResponse {
+  uint32 accepted = 1;
+}
