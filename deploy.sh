@@ -125,7 +125,7 @@ write_worker_env() {
     (umask 077; cat > "$WORKER_ENV") <<EOF || die "cannot write $WORKER_ENV"
 AAGASA_LOG_LEVEL=info
 AAGASA_WORKER_NAME=$name
-AAGASA_SERVER_GRPC_ADDRESS=aagasa-server:9090
+AAGASA_SERVER_GRPC_ADDRESS=aagasa-api:9090
 AAGASA_SERVER_TLS_ENABLED=false
 AAGASA_WORKER_SHARED_SECRET=$1
 AAGASA_STATE_DIR=/var/lib/aagasa/state
@@ -187,9 +187,16 @@ build_server() {
 }
 
 build_worker() {
+    local arch containerfile
+    arch="$(uname -m)"
+    case "$arch" in
+        x86_64|amd64) containerfile=deploy/worker/Containerfile.amd64deb13 ;;
+        aarch64|arm64) containerfile=deploy/worker/Containerfile.rpi4b ;;
+        *) die "unsupported worker architecture: $arch" ;;
+    esac
     cd "$ROOT" || die "cannot enter $ROOT"
     say "Building worker"
-    podman build -f deploy/worker/Containerfile -t aagasa-worker:latest . \
+    podman build -f "$containerfile" -t aagasa-worker:latest . \
         || die "worker image build failed"
 }
 

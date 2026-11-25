@@ -36,7 +36,7 @@ spec:
         - name: redis-data
           mountPath: /data
     - name: mongo
-      image: docker.io/library/mongo:9.0.8
+      image: docker.io/library/mongo:4.4.18
       ports:
         - containerPort: 27017
           hostPort: 27017
