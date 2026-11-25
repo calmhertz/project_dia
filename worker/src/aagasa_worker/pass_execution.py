@@ -22,6 +22,7 @@ from aagasa_worker.hardware.satdump import LOG_FILE_NAME, ProcessResult
 from aagasa_worker.hardware.station import Station
 from aagasa_worker.planstore import StoredPlan
 from aagasa_worker.recordings import free_bytes
+from aagasa_worker.sync import SUPPORTED_PLAN_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +30,6 @@ BYTES_PER_SAMPLE = 4
 
 RESERVE_BYTES = 1 << 30
 
-
-SUPPORTED_PLAN_VERSION = 1
 
 SATDUMP_GRACE_SECONDS = 15
 

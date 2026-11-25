@@ -1,14 +1,14 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: aagasa-databases
+  name: aagasa-db
   labels:
-    app: aagasa-databases
+    app: aagasa-db
 spec:
   restartPolicy: Always
   containers:
     - name: postgres
-      image: docker.io/library/postgres:17-alpine
+      image: docker.io/library/postgres:19-alpine
       env:
         - name: POSTGRES_DB
           value: "aagasa"
@@ -25,13 +25,8 @@ spec:
       volumeMounts:
         - name: postgres-data
           mountPath: /var/lib/postgresql/data
-      livenessProbe:
-        exec:
-          command: ["pg_isready", "-U", "aagasa"]
-        periodSeconds: 30
-
     - name: redis
-      image: docker.io/library/redis:7-alpine
+      image: docker.io/library/redis:8-alpine
       args: ["redis-server", "--appendonly", "yes", "--dir", "/data"]
       ports:
         - containerPort: 6379
@@ -40,15 +35,8 @@ spec:
       volumeMounts:
         - name: redis-data
           mountPath: /data
-      livenessProbe:
-        exec:
-          command: ["redis-cli", "ping"]
-        periodSeconds: 30
-
     - name: mongo
-      # MongoDB 7 requires ARMv8.2-A; 4.4 runs on baseline ARMv8 (e.g. Raspberry
-      # Pi 4 / older SBCs) and still supports everything the server uses.
-      image: docker.io/library/mongo:4.4.18
+      image: docker.io/library/mongo:9.0.8
       ports:
         - containerPort: 27017
           hostPort: 27017
@@ -56,11 +44,6 @@ spec:
       volumeMounts:
         - name: mongo-data
           mountPath: /data/db
-      livenessProbe:
-        exec:
-          command: ["mongo", "--quiet", "--eval", "db.adminCommand('ping')"]
-        periodSeconds: 30
-
   volumes:
     - name: redis-data
       hostPath:

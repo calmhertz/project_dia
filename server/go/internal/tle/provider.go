@@ -40,8 +40,6 @@ func NewChain(logger *slog.Logger, providers ...Provider) *Chain {
 	return &Chain{providers: providers, logger: logger}
 }
 
-func (c *Chain) Providers() []Provider { return c.providers }
-
 func (c *Chain) Fetch(ctx context.Context, noradID int) (Set, Source, error) {
 	if len(c.providers) == 0 {
 		return Set{}, "", errors.New("no TLE providers configured")

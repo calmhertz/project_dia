@@ -32,6 +32,8 @@ class AntennaModeStore:
         except (OSError, ValueError) as error:
             logger.warning("antenna mode unreadable, assuming a rotator: %s", error)
             return False
+        if not isinstance(data, dict):
+            return False
         return bool(data.get("fixed_antenna", False))
 
     def save(self, fixed_antenna: bool) -> None:

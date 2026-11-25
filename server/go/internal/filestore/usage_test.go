@@ -3,6 +3,7 @@ package filestore_test
 import (
 	"errors"
 	"math"
+	"os"
 	"testing"
 
 	"aagasa/internal/filestore"
@@ -58,12 +59,15 @@ func TestNegativeSizeIsTreatedAsZero(t *testing.T) {
 	}
 }
 
-func TestAnUnmeasurableFilesystemDoesNotRefuseWrites(t *testing.T) {
-	store, err := filestore.New(t.TempDir()+"/gone", t.TempDir())
+func TestAnUnmeasurableFilesystemRefusesWrites(t *testing.T) {
+	store, err := filestore.New(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
-	if err := store.EnsureSpaceFor(1024); err != nil {
-		t.Errorf("EnsureSpaceFor on a fresh root = %v, want nil", err)
+	if err := os.RemoveAll(store.RecordingsRoot()); err != nil {
+		t.Fatalf("remove recordings root: %v", err)
+	}
+	if err := store.EnsureSpaceFor(1024); err == nil {
+		t.Error("EnsureSpaceFor on a missing root = nil, want an error")
 	}
 }

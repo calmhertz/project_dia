@@ -4,6 +4,7 @@ The Worker's own source of truth while the Server is unreachable, so these
 tests focus on what survives a restart and what must never be replayed.
 """
 
+import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -97,7 +98,7 @@ def test_resync_adds_updates_and_cancels(store):
 
     summary = store.replace_desired_state([
         plan_dict("keep", BASE + timedelta(hours=2)),
-        plan_dict("change", BASE + timedelta(hours=3), generation="gen-change-v2"),
+        plan_dict("change", BASE + timedelta(hours=3), encoded=b"encoded-change-v2"),
         plan_dict("new", BASE + timedelta(hours=5)),
     ], "set-2")
 
@@ -136,6 +137,17 @@ def test_unchanged_plan_keeps_its_state(store):
 
     store.replace_desired_state([plan_dict("pass-1", BASE + timedelta(hours=2))], "set-1")
 
+    assert store.get("pass-1").state == ExecutionState.EXECUTING
+
+
+def test_a_new_generation_with_identical_content_keeps_state(store):
+    store.replace_desired_state([plan_dict("pass-1", BASE + timedelta(hours=2))], "set-1")
+    store.mark_executing("pass-1", BASE)
+
+    summary = store.replace_desired_state(
+        [plan_dict("pass-1", BASE + timedelta(hours=2), generation="gen-changed")], "set-2")
+
+    assert summary["updated"] == 0
     assert store.get("pass-1").state == ExecutionState.EXECUTING
 
 
@@ -215,6 +227,41 @@ def test_missed_marks_only_closed_windows(store):
     assert missed == ["closed"]
     assert store.get("closed").state == ExecutionState.MISSED
     assert store.get("open").state == ExecutionState.RECEIVED
+
+
+def test_a_closed_window_cannot_be_claimed_while_being_marked_missed(store):
+    store.replace_desired_state([plan_dict("pass-1", BASE - timedelta(hours=1))], "set-1")
+    entered = threading.Event()
+    release = threading.Event()
+    mark_finished = store.mark_finished
+
+    def blocking_mark_finished(pass_id, state, detail=""):
+        if state == ExecutionState.MISSED:
+            entered.set()
+            release.wait(5)
+        mark_finished(pass_id, state, detail)
+
+    store.mark_finished = blocking_mark_finished
+    result = {}
+
+    def miss():
+        result["missed"] = store.mark_missed_before(BASE)
+
+    thread = threading.Thread(target=miss)
+    thread.start()
+    assert entered.wait(5)
+
+    claimed = []
+    claimer = threading.Thread(
+        target=lambda: claimed.append(store.mark_executing("pass-1", BASE)))
+    claimer.start()
+    release.set()
+    thread.join(5)
+    claimer.join(5)
+
+    assert result["missed"] == ["pass-1"]
+    assert claimed == [False]
+    assert store.get("pass-1").state == ExecutionState.MISSED
 
 
 def test_recovery_fails_an_interrupted_pass_rather_than_resuming_it(tmp_path):

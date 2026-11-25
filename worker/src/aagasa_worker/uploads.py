@@ -12,7 +12,7 @@ from pathlib import Path
 
 import grpc
 
-from aagasa_worker.planstore import PlanStore
+from aagasa_worker.planstore import ExecutionState, PlanStore
 from aagasa_worker.recordings import (
     DISK_PRESSURE_THRESHOLD,
     CleanupCandidate,
@@ -27,6 +27,12 @@ from aagasa_worker.recordings import (
 logger = logging.getLogger(__name__)
 
 UPLOAD_BUDGET_SECONDS = 60.0
+
+REPORTABLE_HISTORY_STATES = frozenset({
+    ExecutionState.COMPLETED,
+    ExecutionState.FAILED,
+    ExecutionState.MISSED,
+})
 
 # The Server refused this particular recording, and sending it again would be
 # refused the same way. Anything not listed here, or below, is treated as
@@ -137,11 +143,21 @@ class RecordingUploader:
         if not entries:
             return 0
 
-        response = self._client.report_executions(entries)
-        self._store.mark_history_synced([entry.id for entry in entries])
+        reportable = [entry for entry in entries
+                      if entry.state in REPORTABLE_HISTORY_STATES]
+        ignored = [entry.id for entry in entries
+                   if entry.state not in REPORTABLE_HISTORY_STATES]
+        if ignored:
+            self._store.mark_history_synced(ignored)
+        if not reportable:
+            return 0
+
+        response = self._client.report_executions(reportable)
+        if response.accepted == len(reportable):
+            self._store.mark_history_synced([entry.id for entry in reportable])
         logger.info("reported %d execution record(s), accepted=%d",
-                    len(entries), response.accepted)
-        return len(entries)
+                    len(reportable), response.accepted)
+        return len(reportable)
 
     def enforce_retention(self) -> dict:
         """Apply the retention and disk-pressure rules.

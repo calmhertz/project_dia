@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from aagasa_worker.identity import Identity
+
 logger = logging.getLogger(__name__)
 
 DATABASE_FILENAME = "worker_state.db"
@@ -223,7 +225,7 @@ class PlanStore:
                 existing = {
                     row["pass_id"]: row
                     for row in self._connection.execute(
-                        "SELECT pass_id, generation, state FROM plans"
+                        "SELECT pass_id, plan_version, encoded, aos_epoch, los_epoch, state FROM plans"
                     )
                 }
 
@@ -245,7 +247,10 @@ class PlanStore:
                         summary["unchanged"] += 1
                         continue
 
-                    if current["generation"] == plan["generation"]:
+                    if (current["plan_version"] == plan["plan_version"]
+                            and current["encoded"] == plan["encoded"]
+                            and current["aos_epoch"] == plan["aos"].timestamp()
+                            and current["los_epoch"] == plan["los"].timestamp()):
                         summary["unchanged"] += 1
                         continue
 
@@ -369,9 +374,9 @@ class PlanStore:
                 (*sorted(PENDING_STATES), cutoff.timestamp()),
             ).fetchall()
             missed = [row["pass_id"] for row in rows]
+            for pass_id in missed:
+                self.mark_finished(pass_id, ExecutionState.MISSED, "execution window closed")
 
-        for pass_id in missed:
-            self.mark_finished(pass_id, ExecutionState.MISSED, "execution window closed")
         if missed:
             logger.warning("marked %d pass(es) missed", len(missed))
         return missed
@@ -447,8 +452,6 @@ class PlanStore:
 
     def load_identity(self):
         """The cached identity, or None before the first registration."""
-        from aagasa_worker.identity import Identity
-
         with self._lock:
             rows = {
                 row["key"]: row["value"]

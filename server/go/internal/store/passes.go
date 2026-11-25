@@ -25,19 +25,19 @@ func (r *Repository) ListPasses(ctx context.Context, filter PassFilter) ([]domai
 
 	if filter.RequestedBy != nil {
 		args = append(args, *filter.RequestedBy)
-		query += ` AND requested_by = $` + itoa(len(args))
+		query += ` AND requested_by = $` + strconv.Itoa(len(args))
 	}
 	if len(filter.Statuses) > 0 {
 		args = append(args, statusStrings(filter.Statuses))
-		query += ` AND status = ANY($` + itoa(len(args)) + `::pass_status[])`
+		query += ` AND status = ANY($` + strconv.Itoa(len(args)) + `::pass_status[])`
 	}
 	if !filter.From.IsZero() {
 		args = append(args, filter.From)
-		query += ` AND aos_at >= $` + itoa(len(args))
+		query += ` AND aos_at >= $` + strconv.Itoa(len(args))
 	}
 	if !filter.To.IsZero() {
 		args = append(args, filter.To)
-		query += ` AND aos_at <= $` + itoa(len(args))
+		query += ` AND aos_at <= $` + strconv.Itoa(len(args))
 	}
 	if filter.OnlyPublic {
 		query += ` AND visibility = 'public'`
@@ -46,7 +46,7 @@ func (r *Repository) ListPasses(ctx context.Context, filter PassFilter) ([]domai
 	query += ` ORDER BY aos_at`
 	if filter.Limit > 0 {
 		args = append(args, filter.Limit)
-		query += ` LIMIT $` + itoa(len(args))
+		query += ` LIMIT $` + strconv.Itoa(len(args))
 	}
 
 	rows, err := r.db.Query(ctx, query, args...)
@@ -210,10 +210,6 @@ func statusStrings(statuses []domain.PassStatus) []string {
 		out[index] = string(status)
 	}
 	return out
-}
-
-func itoa(value int) string {
-	return strconv.Itoa(value)
 }
 
 func (r *Repository) GetSchedulingConfigByID(ctx context.Context, id uuid.UUID) (domain.SchedulingConfig, error) {

@@ -41,9 +41,9 @@ for file in .env.server:deploy/server .env.worker:deploy/worker; do
     fi
 done
 
-if ! podman container exists aagasa-databases-postgres; then
+if ! podman container exists aagasa-db-postgres; then
     say "starting the station"
-    "$ROOT/deploy.sh" up || die "the station did not start"
+    "$ROOT/deploy.sh" both up || die "the station did not start"
 fi
 
 say "stopping the server and worker while the data is replaced"
@@ -51,12 +51,12 @@ podman stop aagasa-worker aagasa-server >/dev/null 2>&1
 
 say "restoring postgres"
 gunzip -c "$SOURCE/postgres.sql.gz" \
-    | podman exec -i aagasa-databases-postgres psql -q -U aagasa -d aagasa >/dev/null \
+    | podman exec -i aagasa-db-postgres psql -q -U aagasa -d aagasa >/dev/null \
     || die "the PostgreSQL restore failed; the database is in an unknown state"
 
 if [[ -f "$SOURCE/mongo.archive.gz" ]]; then
     say "restoring mongo"
-    podman exec -i aagasa-databases-mongo mongorestore --quiet --archive --gzip --drop \
+    podman exec -i aagasa-db-mongo mongorestore --quiet --archive --gzip --drop \
         < "$SOURCE/mongo.archive.gz" || say "  mongo restore failed; execution history is incomplete"
 fi
 

@@ -81,6 +81,39 @@ func TestLoadRejectsInvalidStartupTimeout(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsInvalidBoolean(t *testing.T) {
+	for _, value := range []string{"tru", "maybe", "2"} {
+		setValidEnv(t)
+		t.Setenv("AAGASA_TLE_REFRESH_ENABLED", value)
+
+		_, err := Load()
+		if err == nil {
+			t.Errorf("expected error for AAGASA_TLE_REFRESH_ENABLED=%q", value)
+		} else if !strings.Contains(err.Error(), "AAGASA_TLE_REFRESH_ENABLED") {
+			t.Errorf("error = %v", err)
+		}
+	}
+}
+
+func TestLoadAcceptsBooleanValues(t *testing.T) {
+	for value, want := range map[string]bool{
+		"": true, "true": true, "1": true, "yes": true,
+		"false": false, "0": false, "no": false,
+	} {
+		setValidEnv(t)
+		t.Setenv("AAGASA_TLE_REFRESH_ENABLED", value)
+
+		cfg, err := Load()
+		if err != nil {
+			t.Errorf("Load with %q: %v", value, err)
+			continue
+		}
+		if cfg.TLERefreshEnabled != want {
+			t.Errorf("TLERefreshEnabled with %q = %t, want %t", value, cfg.TLERefreshEnabled, want)
+		}
+	}
+}
+
 func writeCertificate(t *testing.T) (certFile, keyFile string) {
 	t.Helper()
 

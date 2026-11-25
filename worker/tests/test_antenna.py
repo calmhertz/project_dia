@@ -54,6 +54,11 @@ def test_a_corrupt_mode_file_falls_back_to_a_rotator(tmp_path):
     assert AntennaModeStore(tmp_path).load() is False
 
 
+def test_a_non_object_mode_file_falls_back_to_a_rotator(tmp_path):
+    (tmp_path / "antenna_mode.json").write_text("[]")
+    assert AntennaModeStore(tmp_path).load() is False
+
+
 def test_a_fixed_antenna_is_not_probed_parked_or_reported(tmp_path):
     writes = []
     station = make_station(writes, fail=True)

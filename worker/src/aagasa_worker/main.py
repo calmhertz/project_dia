@@ -252,10 +252,11 @@ def main() -> int:
         target=worker.run_uploads, name="recording-uploads", daemon=True)
     upload_thread.start()
 
-    received = {}
+    signal_number = None
 
     def handle_signal(signum, _frame):
-        received.setdefault("signal", signum)
+        nonlocal signal_number
+        signal_number = signum
         worker.stop()
         executor.stop()
 
@@ -271,7 +272,7 @@ def main() -> int:
         station.safe_shutdown()
         client.close()
         store.close()
-        logger.info("worker stopped signal=%s", received.get("signal"))
+        logger.info("worker stopped signal=%s", signal_number)
     return 0
 
 

@@ -7,6 +7,7 @@ import (
 
 	"aagasa/internal/auth"
 	"aagasa/internal/domain"
+	"aagasa/internal/store"
 	"aagasa/internal/timezone"
 )
 
@@ -93,7 +94,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	var stationID string
 
-	err = s.repo.InTx(r.Context(), func(tx *storeRepository) error {
+	err = s.repo.InTx(r.Context(), func(tx *store.Repository) error {
 		station, err := tx.CreateStation(r.Context(), domain.Station{
 			Name: request.StationName, Latitude: request.Latitude,
 			Longitude: request.Longitude, AltitudeM: request.AltitudeM,

@@ -1,8 +1,4 @@
-# Aagasa server: the Go API/gRPC server, its migration and root-recovery
-# tools, and the built Flutter web client. The Python prediction service has
-# its own image (Containerfile.prediction).
-
-FROM docker.io/library/golang:1.27 AS go-build
+FROM docker.io/library/golang:1.27.4 AS build
 WORKDIR /src
 COPY server/go/go.mod server/go/go.sum ./server/go/
 RUN cd server/go && go mod download
@@ -11,18 +7,11 @@ RUN cd server/go && for tool in aagasa-server aagasa-migrate aagasa-rootpw; do \
         CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/$tool ./cmd/$tool || exit 1; \
     done
 
-FROM docker.io/library/debian:bookworm-slim
-# CA certificates for the TLE sources (CelesTrak, SatNOGS) over HTTPS. Time
-# zones come from the host's /usr/share/zoneinfo (mounted by deploy.sh), with
-# the copy built into the binary as a fallback.
+FROM docker.io/library/debian:trixie-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && useradd --system --uid 10001 aagasa
-
-COPY --from=go-build /out/ /usr/local/bin/
-COPY deploy/server/web /app/web
-
-USER aagasa
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/ /usr/local/bin/
+COPY client/build/web /app/web
 EXPOSE 8080 9090
-CMD ["/usr/local/bin/aagasa-server"]
+CMD ["aagasa-server"]

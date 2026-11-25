@@ -9,8 +9,6 @@ keeps executing what it already has.
 import logging
 from datetime import datetime, timezone
 
-import grpc
-
 from aagasa_worker.planstore import PlanStore
 
 logger = logging.getLogger(__name__)

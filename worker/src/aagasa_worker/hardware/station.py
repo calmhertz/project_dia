@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from aagasa_worker.hardware.errors import HardwareError, SDRError
 from aagasa_worker.hardware.rotator import G550Rotator
 from aagasa_worker.hardware.satdump import ProcessResult, SatDump
-from aagasa_worker.hardware.sdr import RTLSDRProbe
+from aagasa_worker.hardware.sdr import RTLSDRProbe, RTLTCPProbe
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class CaptureHandle:
 class Station:
     """Coordinates the rotator, the SDR and SatDump for one ground station."""
 
-    def __init__(self, rotator: G550Rotator, sdr: RTLSDRProbe, satdump: SatDump,
+    def __init__(self, rotator: G550Rotator, sdr: RTLSDRProbe | RTLTCPProbe, satdump: SatDump,
                  fixed_antenna: bool = False):
         self._rotator = rotator
         self._sdr = sdr

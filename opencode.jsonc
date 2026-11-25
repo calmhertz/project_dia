@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "formatter": true,
+  "permissions": [
+    { "action": "read", "resource": "*", "effect": "allow" },
+    { "action": "edit", "resource": "*", "effect": "ask" },
+    { "action": "shell", "resource": "*", "effect": "ask" },
+    { "action": "shell", "resource": "git status *", "effect": "allow" },
+    { "action": "shell", "resource": "git diff *", "effect": "allow" },
+    { "action": "shell", "resource": "git check-ignore *", "effect": "allow" },
+    { "action": "shell", "resource": "gofmt -l *", "effect": "allow" },
+    { "action": "shell", "resource": "go test *", "effect": "allow" },
+    { "action": "shell", "resource": "pytest *", "effect": "allow" }
+  ],
+  "policies": [
+    { "action": "tool.use", "resource": "shell:git push *", "effect": "deny" },
+    { "action": "tool.use", "resource": "edit:*.env", "effect": "deny" },
+    { "action": "tool.use", "resource": "edit:*.pem", "effect": "deny" },
+    { "action": "tool.use", "resource": "edit:*.key", "effect": "deny" }
+  ]
+}

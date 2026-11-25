@@ -5,12 +5,13 @@ particular gRPC status, so the classification is exercised without a network.
 """
 
 import sqlite3
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import grpc
 import pytest
 
-from aagasa_worker.planstore import DATABASE_FILENAME, PlanStore
+from aagasa_worker.planstore import DATABASE_FILENAME, ExecutionState, PlanStore
 from aagasa_worker.recordings import collect
 from aagasa_worker.uploads import UPLOAD_BUDGET_SECONDS, RecordingUploader
 
@@ -30,9 +31,11 @@ class FakeRpcError(grpc.RpcError):
 class FakeServer:
     """Accepts uploads unless told to refuse a given file name."""
 
-    def __init__(self, refusals=None):
+    def __init__(self, refusals=None, accepted=None):
         self.refusals = refusals or {}
         self.sent = []
+        self.accepted = accepted
+        self.reports = []
 
     def upload_recording(self, recording, path):
         self.sent.append(recording.relative_path)
@@ -40,6 +43,11 @@ class FakeServer:
         if refusal is not None:
             raise FakeRpcError(*refusal)
         return SimpleNamespace(stored=True)
+
+    def report_executions(self, entries):
+        self.reports = list(entries)
+        accepted = len(entries) if self.accepted is None else self.accepted
+        return SimpleNamespace(accepted=accepted)
 
 
 @pytest.fixture
@@ -156,6 +164,40 @@ def test_no_new_upload_starts_once_the_budget_is_spent(store, tmp_path):
     now["t"] = 1000.0
     uploader.upload_pending()
     assert store.pending_uploads() == []
+
+
+def test_a_partially_accepted_execution_report_keeps_every_entry_unsynced(store, tmp_path):
+    moment = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    store.replace_desired_state([
+        {"pass_id": pass_id, "generation": pass_id, "plan_version": 1,
+         "encoded": pass_id.encode(), "aos": moment, "los": moment}
+        for pass_id in ("pass-1", "pass-2")
+    ], "set-1")
+    for pass_id in ("pass-1", "pass-2"):
+        store.mark_finished(pass_id, ExecutionState.COMPLETED)
+    server = FakeServer(accepted=1)
+
+    uploader_for(store, tmp_path, server).report_outcomes()
+
+    assert len(server.reports) == 2
+    assert len(store.unsynced_history()) == 2
+
+
+def test_unsupported_execution_states_are_dropped_locally(store, tmp_path):
+    moment = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    store.replace_desired_state([
+        {"pass_id": "pass-1", "generation": "g1", "plan_version": 1,
+         "encoded": b"a", "aos": moment, "los": moment}
+    ], "set-1")
+    store.mark_executing("pass-1", moment)
+    store.mark_finished("pass-1", ExecutionState.CANCELLED)
+    server = FakeServer()
+
+    reported = uploader_for(store, tmp_path, server).report_outcomes()
+
+    assert reported == 0
+    assert server.reports == []
+    assert store.unsynced_history() == []
 
 
 def test_an_existing_state_database_gains_the_rejected_column(tmp_path):

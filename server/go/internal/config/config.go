@@ -43,6 +43,10 @@ type Config struct {
 }
 
 func Load() (Config, error) {
+	tleRefreshEnabled, err := envBool("AAGASA_TLE_REFRESH_ENABLED", true)
+	if err != nil {
+		return Config{}, err
+	}
 	cfg := Config{
 		Environment:        env("AAGASA_ENV", "development"),
 		LogLevel:           env("AAGASA_LOG_LEVEL", "info"),
@@ -55,7 +59,7 @@ func Load() (Config, error) {
 		PredictionAddress:  env("AAGASA_PREDICTION_ADDRESS", "127.0.0.1:9091"),
 		CelestrakURL:       os.Getenv("AAGASA_CELESTRAK_URL"),
 		SatNOGSURL:         os.Getenv("AAGASA_SATNOGS_URL"),
-		TLERefreshEnabled:  envBool("AAGASA_TLE_REFRESH_ENABLED", true),
+		TLERefreshEnabled:  tleRefreshEnabled,
 		RecordingsDir:      env("AAGASA_RECORDINGS_DIR", "/var/lib/aagasa/recordings"),
 		PipelinesDir:       env("AAGASA_PIPELINES_DIR", "/var/lib/aagasa/pipelines"),
 		WebDir:             env("AAGASA_WEB_DIR", "/app/web"),
@@ -145,14 +149,16 @@ func env(name, fallback string) string {
 	return fallback
 }
 
-func envBool(name string, fallback bool) bool {
+func envBool(name string, fallback bool) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
 	case "":
-		return fallback
+		return fallback, nil
 	case "1", "true", "yes":
-		return true
+		return true, nil
+	case "0", "false", "no":
+		return false, nil
 	default:
-		return false
+		return false, fmt.Errorf("%s must be true or false", name)
 	}
 }
 

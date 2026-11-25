@@ -7,7 +7,7 @@
 #   scripts/backup.sh [--recordings] [DESTINATION]     (default: ./backups)
 #
 # Keeps the newest AAGASA_BACKUP_KEEP backups (default 14). Run it from cron
-# or a systemd timer while the station is up.
+# while the station is up.
 
 set -uo pipefail
 
@@ -28,19 +28,19 @@ say() { printf '%s\n' "$1"; }
 die() { printf 'backup: %s\n' "$1" >&2; exit 1; }
 
 command -v podman >/dev/null || die "podman is required"
-podman container exists aagasa-databases-postgres \
-    || die "the station is not running; start it with ./deploy.sh up"
+podman container exists aagasa-db-postgres \
+    || die "the station is not running; start it with ./deploy.sh both up"
 
 (umask 077; mkdir -p "$TARGET") || die "cannot create $TARGET"
 say "backing up to $TARGET"
 
-podman exec aagasa-databases-postgres pg_dump -U aagasa --clean --if-exists aagasa \
+podman exec aagasa-db-postgres pg_dump -U aagasa --clean --if-exists aagasa \
     | gzip > "$TARGET/postgres.sql.gz"
 [[ "${PIPESTATUS[0]}" -eq 0 ]] \
     || die "pg_dump failed; the incomplete backup is left in $TARGET for inspection"
 say "  postgres    $(du -h "$TARGET/postgres.sql.gz" | cut -f1)"
 
-if podman exec aagasa-databases-mongo mongodump --quiet --db aagasa --archive --gzip \
+if podman exec aagasa-db-mongo mongodump --quiet --db aagasa --archive --gzip \
         > "$TARGET/mongo.archive.gz"; then
     say "  mongo       $(du -h "$TARGET/mongo.archive.gz" | cut -f1)"
 else

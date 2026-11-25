@@ -10,12 +10,12 @@ for argument in "$@"; do
         --worker) ROLE=worker ;;
         --all)    ROLE=all ;;
         --check)  CHECK_ONLY=true ;;
-        -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) printf 'Usage: %s [--server|--worker|--all] [--check]\n' "$0"; exit 0 ;;
         *) printf 'unknown option: %s\n' "$argument" >&2; exit 2 ;;
     esac
 done
 
-GO_VERSION=1.27.0
+GO_VERSION=1.27.4
 FLUTTER_CHANNEL=stable
 MINIMUM_PYTHON=3.11
 
@@ -249,9 +249,6 @@ if [ "$ROLE" != server ]; then
         note "On Ubuntu take the .deb; on Fedora build from source or use the"
         note "AppImage. The Worker finds it on PATH and reads its pipeline"
         note "directory, so nothing else needs configuring."
-        note ""
-        note "The station cannot record without it: put the .deb at"
-        note "deploy/worker/satdump.deb before running ./deploy.sh up."
     fi
 fi
 
@@ -288,7 +285,7 @@ cat <<NEXT
 
 Next:
   source ${profile:-~/.bashrc}
-  ./deploy.sh up                 # build and start the whole station
+  ./deploy.sh both up            # build and start the whole station
 
 If you are on the station host, plug in the rotator and the dongle and check
 them with:

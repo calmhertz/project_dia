@@ -42,8 +42,6 @@ func New(recordingsRoot, pipelinesRoot string) (*Store, error) {
 
 func (s *Store) RecordingsRoot() string { return s.recordingsRoot }
 
-func (s *Store) PipelinesRoot() string { return s.pipelinesRoot }
-
 func (s *Store) RecordingPath(stationID, passID string) (string, error) {
 	return joinSafe(s.recordingsRoot, stationID, passID)
 }
@@ -119,7 +117,7 @@ func (s *Store) RecordingsUsage() (Usage, error) {
 func (s *Store) EnsureSpaceFor(size int64) error {
 	usage, err := s.RecordingsUsage()
 	if err != nil {
-		return nil
+		return err
 	}
 	if size < 0 {
 		size = 0

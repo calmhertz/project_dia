@@ -19,8 +19,6 @@ import (
 
 const checkTimeout = 3 * time.Second
 
-type storeRepository = store.Repository
-
 type Dependencies struct {
 	Files      *filestore.Store
 	Stores     *store.Stores
