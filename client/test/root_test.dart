@@ -613,6 +613,33 @@ void main() {
     expect(find.textContaining('In force from'), findsOneWidget);
   });
 
+  testWidgets('a pending scheduling change fills the form', (tester) async {
+    final server = configuredAs('root');
+    server.responses['api/scheduling-config'] = {
+      ...server.responses['api/scheduling-config']!,
+      'pending': {
+        'minimum_lead_time_seconds': 600,
+        'pre_pass_buffer_seconds': 120,
+        'post_pass_buffer_seconds': 120,
+        'recording_pre_roll_seconds': 10,
+        'recording_post_roll_seconds': 10,
+        'minimum_elevation_degrees': 12.5,
+        'effective_from': '2026-08-25T10:10:00Z',
+      },
+    };
+
+    await openRootTab(tester, server, 'Configuration');
+
+    final field = tester.widget<TextField>(
+      find.widgetWithText(TextField, 'Minimum lead time (seconds)'),
+    );
+    expect(field.controller!.text, '600');
+    expect(
+      find.textContaining('A change is saved and waiting'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('root can promote, and root itself is protected', (tester) async {
     final server = configuredAs('root');
     await openRootTab(tester, server, 'Accounts');

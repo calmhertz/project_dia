@@ -6,6 +6,7 @@ data/*
 build/*
 server/web/*
 deploy/server/web/*
+!*/client/lib
 
 ### Dart ###
 # See https://www.dartlang.org/guides/libraries/private-files
@@ -140,7 +141,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/

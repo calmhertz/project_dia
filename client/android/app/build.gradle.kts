@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "dev.aagasa.aagasa_client"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

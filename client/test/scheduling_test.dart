@@ -281,7 +281,12 @@ void main() {
     await tester.tap(find.byIcon(Icons.download));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Saved raw.wav'), findsOneWidget);
+    expect(
+      find.textContaining(
+        RegExp(r'Saved raw_\d{2}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2}\.wav'),
+      ),
+      findsOneWidget,
+    );
     expect(
       server.seen.any((entry) => entry.contains('recordings/rec-1/download')),
       isTrue,
