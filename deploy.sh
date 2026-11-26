@@ -302,6 +302,7 @@ start_for() {
         podman pod create --name aagasa-w --network "$NETWORK" >/dev/null \
             || die "could not create the worker pod"
         podman run -d --pod aagasa-w --name aagasa-worker --restart=always \
+            --group-add keep-groups \
             --env-file "$WORKER_ENV" \
             -v "$DATA/worker-state:/var/lib/aagasa/state:Z" \
             -v "$DATA/recordings:/var/lib/aagasa/recordings:Z" \
